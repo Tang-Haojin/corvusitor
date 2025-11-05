@@ -5,8 +5,10 @@
 #include <vector>
 #include <fstream>
 #include <map>
+#include <memory>
 #include "module_info.h"
 #include "connection_builder.h"
+#include "simulator_interface.h"
 
 /**
  * CodeGenerator - Generate VCorvusTopWrapper connection propagation code
@@ -19,7 +21,19 @@
  */
 class CodeGenerator {
 public:
+  /**
+   * Constructor with automatic simulator detection
+   * @param modules_dir Directory containing simulator output
+   */
   CodeGenerator(const std::string& modules_dir);
+
+  /**
+   * Constructor with explicit simulator type
+   * @param modules_dir Directory containing simulator output
+   * @param simulator_type Type of simulator to use
+   */
+  CodeGenerator(const std::string& modules_dir, 
+                SimulatorFactory::SimulatorType simulator_type);
 
   /**
    * Load module and connection data

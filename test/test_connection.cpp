@@ -4,7 +4,8 @@
 #include <vector>
 
 int main() {
-  ModuleParser parser;
+  // Use Verilator parser for testing
+  VerilatorModuleParser parser;
   ConnectionBuilder builder;
 
   std::vector<std::string> test_files = {

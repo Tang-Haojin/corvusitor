@@ -4,42 +4,142 @@
 #include "module_info.h"
 #include <string>
 #include <regex>
+#include <memory>
 
+/**
+ * ModuleParser - Abstract base class for parsing simulator-generated headers
+ * 
+ * Different simulators generate different header file formats.
+ * Each simulator should have its own parser implementation.
+ */
 class ModuleParser {
 public:
-  ModuleParser();
+  virtual ~ModuleParser() = default;
 
-  // Main parse function
-  ModuleInfo parse(const std::string& header_path);
+  /**
+   * Main parse function - must be implemented by subclasses
+   * @param header_path Path to the module header file
+   * @return Parsed module information
+   */
+  virtual ModuleInfo parse(const std::string& header_path) = 0;
 
-private:
-  // Parse a single port macro
-  // Input: "VL_IN8(&signal_name, 7, 0);"
-  // Output: PortInfo
-  PortInfo parse_port_macro(const std::string& line);
+  /**
+   * Get the simulator name this parser is designed for
+   * @return Simulator name string
+   */
+  virtual std::string get_simulator_name() const = 0;
 
-  // Infer type from module name
-  // "corvus_comb_P0" -> COMB
-  // "corvus_seq_P1"  -> SEQ
-  // "corvus_external" -> EXTERNAL
+protected:
+  // Common utility functions that can be used by subclasses
+  
+  /**
+   * Infer module type from module name
+   * "corvus_comb_P0" -> COMB
+   * "corvus_seq_P1"  -> SEQ
+   * "corvus_external" -> EXTERNAL
+   */
   ModuleType infer_module_type(const std::string& module_name);
 
-  // Extract partition ID
-  // "corvus_comb_P0" -> 0
-  // "corvus_seq_P1"  -> 1
-  // "corvus_external" -> -1
+  /**
+   * Extract partition ID from module name
+   * "corvus_comb_P0" -> 0
+   * "corvus_seq_P1"  -> 1
+   * "corvus_external" -> -1
+   */
   int extract_partition_id(const std::string& module_name);
 
-  // Generate instance name
-  // "Vcorvus_comb_P0" -> "comb_p0"
+  /**
+   * Generate instance name from class name
+   * "Vcorvus_comb_P0" -> "comb_p0"
+   */
   std::string generate_instance_name(const std::string& class_name, ModuleType type);
+};
 
-  // Infer static library path
+/**
+ * VerilatorModuleParser - Parser for Verilator-generated headers
+ * 
+ * Parses Verilator's VL_IN/VL_OUT port macros
+ */
+class VerilatorModuleParser : public ModuleParser {
+public:
+  VerilatorModuleParser();
+  virtual ~VerilatorModuleParser() = default;
+
+  ModuleInfo parse(const std::string& header_path) override;
+  
+  std::string get_simulator_name() const override {
+    return "Verilator";
+  }
+
+private:
+  /**
+   * Parse a single Verilator port macro
+   * Input: "VL_IN8(&signal_name, 7, 0);"
+   * Output: PortInfo
+   */
+  PortInfo parse_port_macro(const std::string& line);
+
+  /**
+   * Infer static library path from header path
+   */
   std::string infer_lib_path(const std::string& header_path, const std::string& class_name);
 
-  // Regular expressions
+  // Regular expressions for Verilator port macros
   std::regex port_macro_regex;       // 3-argument format: VL_(IN|OUT)(8|16|64|)
   std::regex port_macro_regex_wide;  // 4-argument format: VL_(IN|OUT)W
+};
+
+/**
+ * VCSModuleParser - Parser for VCS-generated headers (placeholder)
+ * 
+ * TODO: Implement VCS-specific parsing logic
+ */
+class VCSModuleParser : public ModuleParser {
+public:
+  VCSModuleParser();
+  virtual ~VCSModuleParser() = default;
+
+  ModuleInfo parse(const std::string& header_path) override;
+  
+  std::string get_simulator_name() const override {
+    return "VCS";
+  }
+
+private:
+  // TODO: Add VCS-specific parsing methods
+};
+
+/**
+ * ModelsimModuleParser - Parser for Modelsim-generated headers (placeholder)
+ * 
+ * TODO: Implement Modelsim-specific parsing logic
+ */
+class ModelsimModuleParser : public ModuleParser {
+public:
+  ModelsimModuleParser();
+  virtual ~ModelsimModuleParser() = default;
+
+  ModuleInfo parse(const std::string& header_path) override;
+  
+  std::string get_simulator_name() const override {
+    return "Modelsim";
+  }
+
+private:
+  // TODO: Add Modelsim-specific parsing methods
+};
+
+/**
+ * ModuleParserFactory - Factory to create appropriate parser for a simulator
+ */
+class ModuleParserFactory {
+public:
+  /**
+   * Create a parser for the specified simulator
+   * @param simulator_name Name of the simulator ("Verilator", "VCS", "Modelsim")
+   * @return Unique pointer to the appropriate parser
+   */
+  static std::unique_ptr<ModuleParser> create(const std::string& simulator_name);
 };
 
 #endif // MODULE_PARSER_H

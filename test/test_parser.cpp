@@ -3,7 +3,8 @@
 #include <vector>
 
 int main() {
-  ModuleParser parser;
+  // Use Verilator parser for testing
+  VerilatorModuleParser parser;
 
   // Test parsing header files in example directory
   std::vector<std::string> test_files = {

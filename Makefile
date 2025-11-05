@@ -13,17 +13,20 @@ BUILD_DIR = build
 ## Source files
 SRC_FILES = $(SRC_DIR)/module_parser.cpp \
             $(SRC_DIR)/connection_builder.cpp \
-            $(SRC_DIR)/code_generator.cpp
+            $(SRC_DIR)/code_generator.cpp \
+            $(SRC_DIR)/simulator_interface.cpp
 OBJ_FILES = $(BUILD_DIR)/module_parser.o \
             $(BUILD_DIR)/connection_builder.o \
-            $(BUILD_DIR)/code_generator.o
+            $(BUILD_DIR)/code_generator.o \
+            $(BUILD_DIR)/simulator_interface.o
 
 ## Header files
 HEADERS = $(INCLUDE_DIR)/port_info.h \
           $(INCLUDE_DIR)/module_info.h \
           $(INCLUDE_DIR)/module_parser.h \
           $(INCLUDE_DIR)/connection_builder.h \
-          $(INCLUDE_DIR)/code_generator.h
+          $(INCLUDE_DIR)/code_generator.h \
+          $(INCLUDE_DIR)/simulator_interface.h
 
 ## Test programs
 TEST_PARSER_BIN = test_parser
@@ -57,6 +60,10 @@ $(BUILD_DIR)/connection_builder.o: $(SRC_DIR)/connection_builder.cpp $(HEADERS) 
 
 ## Build code_generator.o
 $(BUILD_DIR)/code_generator.o: $(SRC_DIR)/code_generator.cpp $(HEADERS) | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+## Build simulator_interface.o
+$(BUILD_DIR)/simulator_interface.o: $(SRC_DIR)/simulator_interface.cpp $(HEADERS) | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 ## Build test programs

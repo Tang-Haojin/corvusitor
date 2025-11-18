@@ -29,16 +29,16 @@ HEADERS = $(INCLUDE_DIR)/port_info.h \
           $(INCLUDE_DIR)/simulator_interface.h
 
 ## Test programs
-TEST_PARSER_BIN = test_parser
+TEST_PARSER_BIN = $(BUILD_DIR)/test_parser
 TEST_PARSER_SRC = $(TEST_DIR)/test_parser.cpp
-TEST_CONN_BIN = test_connection
+TEST_CONN_BIN = $(BUILD_DIR)/test_connection
 TEST_CONN_SRC = $(TEST_DIR)/test_connection.cpp
-TEST_CODEGEN_BIN = test_code_generator
+TEST_CODEGEN_BIN = $(BUILD_DIR)/test_code_generator
 TEST_CODEGEN_SRC = $(TEST_DIR)/test_code_generator.cpp
 
 ## Default target
 .PHONY: all
-CORVUSITOR_BIN = corvusitor
+CORVUSITOR_BIN = $(BUILD_DIR)/corvusitor
 MAIN_SRC = $(SRC_DIR)/main.cpp
 
 all: $(TEST_PARSER_BIN) $(TEST_CONN_BIN) $(TEST_CODEGEN_BIN) $(CORVUSITOR_BIN)
@@ -96,7 +96,7 @@ test_codegen: $(TEST_CODEGEN_BIN)
 ## Clean build artifacts
 .PHONY: clean
 clean:
-	rm -rf $(BUILD_DIR) $(TEST_PARSER_BIN) $(TEST_CONN_BIN) $(TEST_CODEGEN_BIN) $(CORVUSITOR_BIN)
+	rm -rf $(BUILD_DIR)
 
 ## Show help
 .PHONY: help

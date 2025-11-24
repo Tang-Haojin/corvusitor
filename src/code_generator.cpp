@@ -636,11 +636,11 @@ bool CodeGenerator::generate_makefile(const std::string& output_file_base) {
   out << "# Generated: " << __DATE__ << " " << __TIME__ << "\n";
   out << "\n";
   out << "# Verilator configuration\n";
-  out << "VERILATOR_ROOT ?= $(shell verilator --getenv VERILATOR_ROOT)\n";
-  out << "VERILATOR_INCLUDE = $(VERILATOR_ROOT)/include\n";
+  out << "_CORVUS_VERILATOR_ROOT ?= $(shell verilator --getenv VERILATOR_ROOT)\n";
+  out << "_CORVUS_VERILATOR_INCLUDE = $(_CORVUS_VERILATOR_ROOT)/include\n";
   out << "\n";
   out << "# Module directories\n";
-  out << "MODULE_PATH = " << modules_dir_ << "\n";
+  out << "_CORVUS_MODULE_PATH = " << modules_dir_ << "\n";
 
   // Generate module directory variables
   for (const auto& pair : modules_) {
@@ -648,106 +648,106 @@ bool CodeGenerator::generate_makefile(const std::string& output_file_base) {
     std::string var_name = module_name;
     std::transform(var_name.begin(), var_name.end(), var_name.begin(), ::toupper);
     std::replace(var_name.begin(), var_name.end(), '_', '_');
-    out << var_name << "_DIR = $(MODULE_PATH)/verilator-compile-" << module_name << "\n";
+    out << "_CORVUS_" << var_name << "_DIR = $(_CORVUS_MODULE_PATH)/verilator-compile-" << module_name << "\n";
   }
 
   out << "\n";
   out << "# Compiler settings\n";
-  out << "CXX ?= g++\n";
-  out << "CXXFLAGS = -std=c++14 -Wall -Wextra -g \\\n";
-  out << "           -I. \\\n";
-  out << "           -I$(VERILATOR_INCLUDE) \\\n";
-  out << "           -I$(VERILATOR_INCLUDE)/vltstd";
+  out << "_CORVUS_CXX ?= g++\n";
+  out << "_CORVUS_CXXFLAGS = -std=c++14 -Wall -Wextra -g \\\n";
+  out << "                   -I. \\\n";
+  out << "                   -I$(_CORVUS_VERILATOR_INCLUDE) \\\n";
+  out << "                   -I$(_CORVUS_VERILATOR_INCLUDE)/vltstd";
 
   // Add module include paths
   for (const auto& pair : modules_) {
     const std::string& module_name = pair.first;
     std::string var_name = module_name;
     std::transform(var_name.begin(), var_name.end(), var_name.begin(), ::toupper);
-    out << " \\\n           -I$(" << var_name << "_DIR)";
+    out << " \\\n                   -I$(" << "_CORVUS_" << var_name << "_DIR)";
   }
   out << "\n";
 
-  out << "LDLIBS = -lpthread -lz\n";
+  out << "_CORVUS_LDLIBS = -lpthread -lz\n";
 
   // Extra include flags provided by users
   out << "\n";
   out << "# User provided extra include flags\n";
-  out << "USER_INCLUDE_FLAGS ?=\n";
-  out << "CXXFLAGS += $(USER_INCLUDE_FLAGS)\n";
+  out << "_CORVUS_USER_INCLUDE_FLAGS ?=\n";
+  out << "_CORVUS_CXXFLAGS += $(_CORVUS_USER_INCLUDE_FLAGS)\n";
 
   // Extra macro flags provided by users
   out << "\n";
   out << "# User provided extra macro flags\n";
-  out << "USER_MACRO_FLAGS ?=\n";
-  out << "CXXFLAGS += $(USER_MACRO_FLAGS)\n";
+  out << "_CORVUS_USER_MACRO_FLAGS ?=\n";
+  out << "_CORVUS_CXXFLAGS += $(_CORVUS_USER_MACRO_FLAGS)\n";
 
   // Extra library flags provided by users
   out << "\n";
   out << "# User provided extra library flags\n";
-  out << "USER_LIB_FLAGS ?=\n";
-  out << "LDLIBS += $(USER_LIB_FLAGS)\n";
+  out << "_CORVUS_USER_LIB_FLAGS ?=\n";
+  out << "_CORVUS_LDLIBS += $(_CORVUS_USER_LIB_FLAGS)\n";
 
   // Verilator runtime libraries
   out << "\n";
   out << "# Verilator runtime libraries (including tracing support)\n";
-  out << "VERILATOR_LIBS = $(VERILATOR_INCLUDE)/verilated.cpp \\\n";
-  out << "                 $(VERILATOR_INCLUDE)/verilated_threads.cpp \\\n";
-  out << "                 $(VERILATOR_INCLUDE)/verilated_fst_c.cpp\n";
+  out << "_CORVUS_VERILATOR_LIBS = $(_CORVUS_VERILATOR_INCLUDE)/verilated.cpp \\\n";
+  out << "                         $(_CORVUS_VERILATOR_INCLUDE)/verilated_threads.cpp \\\n";
+  out << "                         $(_CORVUS_VERILATOR_INCLUDE)/verilated_fst_c.cpp\n";
   out << "\n";
 
   // Extra sources provided by users
   out << "\n";
   out << "# User provided extra sources\n";
-  out << "USER_SRC_FILES ?=\n";
+  out << "_CORVUS_USER_SRC_FILES ?=\n";
 
   out << "\n";
   out << "# Generated module object files\n";
-  out << "MODULE_OBJS =";
+  out << "_CORVUS_MODULE_OBJS =";
 
   for (const auto& pair : modules_) {
     const std::string& module_name = pair.first;
     std::string var_name = module_name;
     std::transform(var_name.begin(), var_name.end(), var_name.begin(), ::toupper);
-    out << " \\\n              $(" << var_name << "_DIR)/V" << module_name << "__ALL.a";
+    out << " \\\n                      $(" << "_CORVUS_" << var_name << "_DIR)/V" << module_name << "__ALL.a";
   }
 
   out << "\n\n";
   out << "# Build targets\n";
   out << "# Specify your main source file when running make:\n";
-  out << "#   make TARGET=my_program MAIN_SRC=my_main.cpp\n";
-  out << "TARGET ?= main\n";
-  out << "MAIN_SRC ?= main.cpp\n";
-  out << "SOURCES = $(MAIN_SRC) " << wrapper_cpp_file << " $(VERILATOR_LIBS) $(USER_SRC_FILES)\n";
+  out << "#   make _CORVUS_TARGET=my_program _CORVUS_MAIN_SRC=my_main.cpp\n";
+  out << "_CORVUS_TARGET ?= main\n";
+  out << "_CORVUS_MAIN_SRC ?= main.cpp\n";
+  out << "_CORVUS_SOURCES = $(_CORVUS_MAIN_SRC) " << wrapper_cpp_file << " $(_CORVUS_VERILATOR_LIBS) $(_CORVUS_USER_SRC_FILES)\n";
   out << "\n";
-  out << ".PHONY: all clean test\n";
+  out << ".PHONY: _CORVUS_all _CORVUS_clean _CORVUS_test\n";
   out << "\n";
-  out << "all: $(TARGET)\n";
+  out << "_CORVUS_all: $(_CORVUS_TARGET)\n";
   out << "\n";
-  out << "$(TARGET): $(SOURCES) " << wrapper_h_file << "\n";
-  out << "\t@echo \"=== Compiling $(TARGET) ===\"\n";
-  out << "\t$(CXX) $(CXXFLAGS) -o $@ $(SOURCES) $(MODULE_OBJS) $(LDLIBS)\n";
+  out << "$(_CORVUS_TARGET): $(_CORVUS_SOURCES) " << wrapper_h_file << "\n";
+  out << "\t@echo \"=== Compiling $(_CORVUS_TARGET) ===\"\n";
+  out << "\t$(_CORVUS_CXX) $(_CORVUS_CXXFLAGS) -o $@ $(_CORVUS_SOURCES) $(_CORVUS_MODULE_OBJS) $(_CORVUS_LDLIBS)\n";
   out << "\n";
-  out << "test: $(TARGET)\n";
+  out << "_CORVUS_test: $(_CORVUS_TARGET)\n";
   out << "\t@echo \"\"\n";
-  out << "\t@echo \"=== Running $(TARGET) ===\"\n";
-  out << "\t@./$(TARGET)\n";
+  out << "\t@echo \"=== Running $(_CORVUS_TARGET) ===\"\n";
+  out << "\t@./$(_CORVUS_TARGET)\n";
   out << "\n";
-  out << "clean:\n";
-  out << "\trm -f $(TARGET) *.o\n";
+  out << "_CORVUS_clean:\n";
+  out << "\trm -f $(_CORVUS_TARGET) *.o\n";
   out << "\n";
-  out << "help:\n";
+  out << "_CORVUS_help:\n";
   out << "\t@echo \"Auto-generated Makefile for VCorvusTopWrapper\"\n";
   out << "\t@echo \"=============================================\"\n";
   out << "\t@echo \"Usage:\"\n";
-  out << "\t@echo \"  make [TARGET=name] [MAIN_SRC=file.cpp]  - Build with custom main file\"\n";
-  out << "\t@echo \"  make test                                 - Build and run test program\"\n";
-  out << "\t@echo \"  make clean                                - Remove build artifacts\"\n";
-  out << "\t@echo \"  make help                                 - Show this help message\"\n";
+  out << "\t@echo \"  make [_CORVUS_TARGET=name] [_CORVUS_MAIN_SRC=file.cpp]   - Build with custom main file\"\n";
+  out << "\t@echo \"  make _CORVUS_test                                        - Build and run test program\"\n";
+  out << "\t@echo \"  make _CORVUS_clean                                       - Remove build artifacts\"\n";
+  out << "\t@echo \"  make _CORVUS_help                                        - Show this help message\"\n";
   out << "\t@echo \"\"\n";
   out << "\t@echo \"Examples:\"\n";
-  out << "\t@echo \"  make                                      - Build default (test_wrapper)\"\n";
-  out << "\t@echo \"  make TARGET=my_sim MAIN_SRC=my_sim.cpp   - Build custom program\"\n";
+  out << "\t@echo \"  make                                                     - Build default (test_wrapper)\"\n";
+  out << "\t@echo \"  make _CORVUS_TARGET=my_sim _CORVUS_MAIN_SRC=my_sim.cpp   - Build custom program\"\n";
 
   out.close();
 

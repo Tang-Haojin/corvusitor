@@ -1,4 +1,4 @@
-#include "simcore_app.h"
+#include "sim_core_app.h"
 
 void SimCoreApp::loop() {
     while(1) {

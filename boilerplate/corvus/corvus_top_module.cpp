@@ -1,13 +1,13 @@
-#include "master_handle.h"
+#include "corvus_top_module.h"
 
-void MasterHandle::init() {
+void CorvusTopModule::init() {
     synctreeEndpoint->forceSimCoreReset();
     while(!synctreeEndpoint->isMBusClear() ||
           !synctreeEndpoint->isSBusClear() || !allSimCoreSFinish()) {}
     clearMBusRecvBuffer();
 }
 
-void MasterHandle::eval() {
+void CorvusTopModule::eval() {
     sendIAndEOutput();
     while(!synctreeEndpoint->isMBusClear() || !synctreeEndpoint->isSBusClear() || !allSimCoreSFinish()) {}
     raiseMasterSyncFlag();
@@ -15,12 +15,12 @@ void MasterHandle::eval() {
     loadOAndEInput();
 }
 
-void MasterHandle::evalE() {
-    eModule->eval();
+void CorvusTopModule::evalE() {
+    eHandle->eval();
 }
 
-bool MasterHandle::allSimCoreCFinish() {
-    if(synctreeEndpoint->getSimCoreCFinishFlag() == SynctreeEndpoint::FlipFlag::PENDING) {
+bool CorvusTopModule::allSimCoreCFinish() {
+    if(synctreeEndpoint->getSimCoreCFinishFlag() == CorvusSynctreeEndpoint::FlipFlag::PENDING) {
         return false;
     }
     if(prevCFinishFlag == synctreeEndpoint->getSimCoreCFinishFlag()) {
@@ -31,8 +31,8 @@ bool MasterHandle::allSimCoreCFinish() {
     }
 }
 
-bool MasterHandle::allSimCoreSFinish() {
-    if(synctreeEndpoint->getSimCoreSFinishFlag() == SynctreeEndpoint::FlipFlag::PENDING) {
+bool CorvusTopModule::allSimCoreSFinish() {
+    if(synctreeEndpoint->getSimCoreSFinishFlag() == CorvusSynctreeEndpoint::FlipFlag::PENDING) {
         return false;
     }
     if(prevSFinishFlag == synctreeEndpoint->getSimCoreSFinishFlag()) {
@@ -43,11 +43,11 @@ bool MasterHandle::allSimCoreSFinish() {
     }
 }
 
-void MasterHandle::raiseMasterSyncFlag() {
-    if(masterSyncFlag == SynctreeEndpoint::FlipFlag::PENDING || masterSyncFlag == SynctreeEndpoint::FlipFlag::B_SIDE) {
-        masterSyncFlag = SynctreeEndpoint::FlipFlag::A_SIDE;
+void CorvusTopModule::raiseMasterSyncFlag() {
+    if(masterSyncFlag == CorvusSynctreeEndpoint::FlipFlag::PENDING || masterSyncFlag == CorvusSynctreeEndpoint::FlipFlag::B_SIDE) {
+        masterSyncFlag = CorvusSynctreeEndpoint::FlipFlag::A_SIDE;
     } else {
-        masterSyncFlag = SynctreeEndpoint::FlipFlag::B_SIDE;
+        masterSyncFlag = CorvusSynctreeEndpoint::FlipFlag::B_SIDE;
     }
     synctreeEndpoint->setMasterSyncFlag(masterSyncFlag);
 }

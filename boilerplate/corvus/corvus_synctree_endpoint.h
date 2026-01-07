@@ -3,7 +3,7 @@
 
 #include <cstdint>
 
-class SynctreeEndpoint{
+class CorvusSynctreeEndpoint{
     public:
     enum class FlipFlag : uint8_t {
         PENDING = 0,
@@ -12,9 +12,9 @@ class SynctreeEndpoint{
     };
 };
 
-class MasterSynctreeEndpoint : public SynctreeEndpoint {
+class CorvusTopSynctreeEndpoint : public CorvusSynctreeEndpoint {
 public:
-  virtual ~MasterSynctreeEndpoint() = default;
+  virtual ~CorvusTopSynctreeEndpoint() = default;
   virtual void forceSimCoreReset();
   virtual bool isMBusClear() = 0;
   virtual bool isSBusClear() = 0;
@@ -23,9 +23,9 @@ public:
   virtual void setMasterSyncFlag(FlipFlag flag) = 0;
 };
 
-class SimCoreSynctreeEndpoint : public SynctreeEndpoint {
+class CorvusSimWorkerSynctreeEndpoint : public CorvusSynctreeEndpoint {
 public:
-    virtual ~SimCoreSynctreeEndpoint() = default;
+    virtual ~CorvusSimWorkerSynctreeEndpoint() = default;
     virtual void setCFinishFlag(FlipFlag flag) = 0;
     virtual void setSFinishFlag(FlipFlag flag) = 0;
     virtual FlipFlag getMasterSyncFlag() = 0;

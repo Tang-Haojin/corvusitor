@@ -6,7 +6,7 @@
 #include <pthread.h>
 #endif
 
-CorvusCModelSimWorkerRunner::CorvusCModelSimWorkerRunner(std::vector<std::shared_ptr<CorvusCModelSimWorker>> simWorkers)
+CorvusCModelSimWorkerRunner::CorvusCModelSimWorkerRunner(std::vector<std::shared_ptr<CorvusSimWorker>> simWorkers)
     : simWorkers(std::move(simWorkers)) {}
 
 CorvusCModelSimWorkerRunner::~CorvusCModelSimWorkerRunner() {

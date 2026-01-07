@@ -8,7 +8,7 @@
 - 覆盖 Endpoint 的 send 虚方法，在 Bus 类的辅助下，将 payload 放入目标端点的接收缓冲区
 - 覆盖 Endpoint 的 recv 虚方法，从自身的接收缓冲区中取出数据
 - 覆盖 Endpoint 的 bufferCnt 和 clearBuffer 方法，分别返回缓冲区中数据的数量和清空缓冲区
-- Bus 提供 Endpoint 的指针，之后注入到 CorvusCModelSimWorker 和 ModuleHandle 中使用
+- Bus 提供 Endpoint 的指针，之后注入到 CorvusSimWorker 和 ModuleHandle 中使用
 - Endpoint 的 buffer 写入要加锁保护，但读取不需要，读取时假设只有一个线程在操作
 - Bus 构造时接受 endpointCount，提前创建所有 Endpoint，析构时负责释放
 - 提供 getEndpointCount 方法查询端点总数，getEndpoint/getEndpoints 获取已有端点
@@ -27,28 +27,22 @@
 - CorvusCModelSimWorkerSynctreeEndpoint 的 setSFinishFlag 方法设置对应的 simCoreSFinishFlag
 - CorvusCModelSimWorkerSynctreeEndpoint 的 getMasterSyncFlag 方法返回 masterSyncFlag
 
-# CorvusCModelSimWorker
+# CorvusSimWorker
 
-- 实现 CorvusCModelSimWorker 类，继承自 CorvusSimWorker，放在 boilerplate/corvus_cmodel/corvus_cmodel_sim_worker.h 和 boilerplate/corvus_cmodel/corvus_cmodel_sim_worker.cpp
-- CorvusCModelSimWorker 的构造函数传入的参数列表及处理方法如下
-    - ModuleHandle* cModule 和 ModuleHandle* sModule ：分别绑定在对应的基类指针上
-    - std::shared_ptr<CorvusSimWorkerSynctreeEndpoint> simCoreSynctreeEndpoint ：绑定在对应的基类指针上
-    - vector<std::shared_ptr<CorvusCModelIdealizedBusEndpoint>> mBusEndpoints 和 vector<std::shared_ptr<CorvusCModelIdealizedBusEndpoint>> sBusEndpoints ：将指针记录到成员变量中，供生成的函数调用
-- 声明所有的虚方法，但不需要给出定义实现，之后由代码生成器生成具体实现
+- 使用 boilerplate/corvus/corvus_sim_worker.h 和 boilerplate/corvus/corvus_sim_worker.cpp 提供的骨架
+- 构造函数传入 CorvusSimWorkerSynctreeEndpoint* 以及 mBus/sBus 的 vector<CorvusBusEndpoint*>，类中持有这些成员供生成的函数调用
+- 声明所有的虚方法，但不需要给出定义实现，之后由代码生成器生成具体实现；其中 `createSimModules`/`deleteSimModules` 负责创建和销毁 `cModule/sModule`，通过 `init`/`cleanup` 触发
 
-# CorvusCModelTopModule
+# CorvusTopModule
 
-- 实现 CorvusCModelTopModule 类，继承自 CorvusTopModule，放在 boilerplate/corvus_cmodel/corvus_cmodel_top_module.h 和 boilerplate/corvus_cmodel/corvus_cmodel_top_module.cpp
-- CorvusCModelTopModule 的构造函数传入的参数列表及处理方法如下
-    - ModuleHandle* eModule 绑定在对应的基类指针上
-    - std::shared_ptr<CorvusTopSynctreeEndpoint> masterSynctreeEndpoint 绑定在对应的基类指针上
-    - vector<std::shared_ptr<CorvusCModelIdealizedBusEndpoint>> mBusEndpoints 和 vector<std::shared_ptr<CorvusCModelIdealizedBusEndpoint>> sBusEndpoints ：将指针记录到成员变量中，供生成的函数调用
-- 声明所有的虚方法，但不需要给出定义实现，之后由代码生成器生成具体实现
+- 使用 boilerplate/corvus/corvus_top_module.h 和 boilerplate/corvus/corvus_top_module.cpp 提供的骨架
+- 构造函数传入 CorvusTopSynctreeEndpoint* 以及 mBus/sBus 的 vector<CorvusBusEndpoint*>，类中持有这些成员供生成的函数调用
+- 声明所有的虚方法，但不需要给出定义实现，之后由代码生成器生成具体实现；其中 `createExternalModule`/`deleteExternalModule` 负责创建和销毁 `eHandle`，通过 `init`/`cleanup` 触发；`resetSimWorker` 替代原 `init` 行为，`clearMBusRecvBuffer` 已默认（私有）清空 mBusEndpoints
 
 # CorvusCModelSimWorkerRunner
 
 - 实现 CorvusCModelSimWorkerRunner 类，放在 boilerplate/corvus_cmodel/corvus_cmodel_sim_worker_runner.h 和 boilerplate/corvus_cmodel/corvus_cmodel_sim_worker_runner.cpp
 - CorvusCModelSimWorkerRunner 的构造函数接收以下参数
-    - vector<std::shared_ptr<CorvusCModelSimWorker>> simWorkers ：所有 simWorker 的指针
-- CorvusCModelSimWorkerRunner 提供 run 方法，为每一个 CorvusCModelSimWorker 创建一个线程并运行 loop 方法，run 方法不等待线程结束即返回
+    - vector<std::shared_ptr<CorvusSimWorker>> simWorkers ：所有 simWorker 的指针
+- CorvusCModelSimWorkerRunner 提供 run 方法，为每一个 CorvusSimWorker 创建一个线程并运行 loop 方法，run 方法不等待线程结束即返回
 - CorvusCModelSimWorkerRunner 提供 stop 方法，杀死所有仿真核的线程

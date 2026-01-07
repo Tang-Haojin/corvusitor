@@ -1,4 +1,12 @@
 #include "corvus_sim_worker.h"
+#include <utility>
+
+CorvusSimWorker::CorvusSimWorker(CorvusSimWorkerSynctreeEndpoint* simCoreSynctreeEndpoint,
+                                 std::vector<CorvusBusEndpoint*> mBusEndpoints,
+                                 std::vector<CorvusBusEndpoint*> sBusEndpoints)
+    : synctreeEndpoint(simCoreSynctreeEndpoint),
+      mBusEndpoints(std::move(mBusEndpoints)),
+      sBusEndpoints(std::move(sBusEndpoints)) {}
 
 void CorvusSimWorker::loop() {
     while(1) {

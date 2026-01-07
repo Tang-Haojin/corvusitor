@@ -1,6 +1,15 @@
 #include "corvus_top_module.h"
+#include <utility>
 
-void CorvusTopModule::init() {
+CorvusTopModule::CorvusTopModule(CorvusTopSynctreeEndpoint* masterSynctreeEndpoint,
+                                 std::vector<CorvusBusEndpoint*> mBusEndpoints,
+                                 std::vector<CorvusBusEndpoint*> sBusEndpoints)
+    : synctreeEndpoint(masterSynctreeEndpoint),
+      mBusEndpoints(std::move(mBusEndpoints)),
+      sBusEndpoints(std::move(sBusEndpoints)) {
+}
+
+void CorvusTopModule::resetSimWorker() {
     synctreeEndpoint->forceSimCoreReset();
     while(!synctreeEndpoint->isMBusClear() ||
           !synctreeEndpoint->isSBusClear() || !allSimCoreSFinish()) {}
@@ -50,4 +59,12 @@ void CorvusTopModule::raiseMasterSyncFlag() {
         masterSyncFlag = CorvusSynctreeEndpoint::FlipFlag::B_SIDE;
     }
     synctreeEndpoint->setMasterSyncFlag(masterSyncFlag);
+}
+
+void CorvusTopModule::clearMBusRecvBuffer() {
+    for (auto endpoint : mBusEndpoints) {
+        if (endpoint) {
+            endpoint->clearBuffer();
+        }
+    }
 }

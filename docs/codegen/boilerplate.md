@@ -13,18 +13,18 @@
 - 已实现共享指针管理的端点创建/查询逻辑，无需生成代码。
 
 ## 仿真核 Worker
-- 文件：`boilerplate/corvus_cmodel/corvus_cmodel_sim_worker.{h,cpp}`
-- 类：`CorvusCModelSimWorker`（继承 `CorvusSimWorker`）
-- 生成器需补全以下虚方法的实现：`loadBusCInputs`、`sendCOutputsToBus`、`loadSInputs`、`sendSOutputs`、`loadLocalCInputs`。
-- 构造函数已绑定 `cModule/sModule`、同步树端点以及 m/s 总线端点（均为 `std::shared_ptr`）。
+- 文件：`boilerplate/corvus/corvus_sim_worker.{h,cpp}`
+- 类：`CorvusSimWorker`
+- 生成器需补全以下虚方法的实现：`createSimModules`（负责创建并填充 `cModule/sModule`）、`deleteSimModules`（负责释放它们）、`loadBusCInputs`、`sendCOutputsToBus`、`loadSInputs`、`sendSOutputs`、`loadLocalCInputs`。
+- 提供 `init`/`cleanup` 以调用上述创建/销毁逻辑，构造函数仅接收同步树端点以及 m/s 总线端点（均为裸指针），不会自动调用创建逻辑。
 
 ## 顶层模块
-- 文件：`boilerplate/corvus_cmodel/corvus_cmodel_top_module.{h,cpp}`
-- 类：`CorvusCModelTopModule`（继承 `CorvusTopModule`）
-- 生成器需补全以下虚方法的实现：`clearMBusRecvBuffer`、`sendIAndEOutput`、`loadOAndEInput`。
-- 构造函数已绑定 eval 端、同步树端点以及 m/s 总线端点（均为 `std::shared_ptr`）。
+- 文件：`boilerplate/corvus/corvus_top_module.{h,cpp}`
+- 类：`CorvusTopModule`
+- 生成器需补全以下虚方法的实现：`createExternalModule`（负责创建并填充 `eHandle`）、`deleteExternalModule`（负责释放它）、`sendIAndEOutput`、`loadOAndEInput`、`resetSimWorker`（替代原 `init` 行为）。`clearMBusRecvBuffer` 已默认清空所有 mBusEndpoints，方法为私有。
+- 提供 `init`/`cleanup` 以调用外设模块与顶层端口的创建/销毁逻辑；构造函数仅接收同步树端点以及 m/s 总线端点（均为裸指针），不会自动调用创建逻辑。
 
 ## Worker 线程运行器
 - 文件：`boilerplate/corvus_cmodel/corvus_cmodel_sim_worker_runner.{h,cpp}`
 - 类：`CorvusCModelSimWorkerRunner`
-- 已实现：构造函数接受 `vector<std::shared_ptr<CorvusCModelSimWorker>>`，`run` 为每个 worker 启动线程调用 `loop`，`stop` 取消并等待线程结束。无需生成代码。
+- 已实现：构造函数接受 `vector<std::shared_ptr<CorvusSimWorker>>`，`run` 为每个 worker 启动线程调用 `loop`，`stop` 取消并等待线程结束。无需生成代码。

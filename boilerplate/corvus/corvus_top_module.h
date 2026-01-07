@@ -1,20 +1,27 @@
 #ifndef CORVUS_TOP_MODULE_H
 #define CORVUS_TOP_MODULE_H
 
-#include <memory>
+#include <vector>
 
 #include "top_module.h"
+#include "corvus_bus_endpoint.h"
 #include "corvus_synctree_endpoint.h"
 
 class CorvusTopModule : public TopModule {
 public:
-    ~CorvusTopModule() override = default;
-    void init() override;
+    CorvusTopModule(CorvusTopSynctreeEndpoint* masterSynctreeEndpoint,
+                    std::vector<CorvusBusEndpoint*> mBusEndpoints,
+                    std::vector<CorvusBusEndpoint*> sBusEndpoints);
+    void resetSimWorker() override;
     void eval() override;
     void evalE() override;
 
 protected:
-    std::shared_ptr<CorvusTopSynctreeEndpoint> synctreeEndpoint = nullptr;
+    CorvusTopSynctreeEndpoint* synctreeEndpoint = nullptr;
+    std::vector<CorvusBusEndpoint*> mBusEndpoints;
+    std::vector<CorvusBusEndpoint*> sBusEndpoints;
+    virtual void sendIAndEOutput() = 0;
+    virtual void loadOAndEInput() = 0;
 
 private:
     CorvusSynctreeEndpoint::FlipFlag prevCFinishFlag = CorvusSynctreeEndpoint::FlipFlag::PENDING;
@@ -23,10 +30,8 @@ private:
 
     bool allSimCoreCFinish();
     bool allSimCoreSFinish();
-    virtual void clearMBusRecvBuffer() = 0;
-    virtual void sendIAndEOutput() = 0;
     void raiseMasterSyncFlag();
-    virtual void loadOAndEInput() = 0;
+    void clearMBusRecvBuffer();
 };
 
 #endif

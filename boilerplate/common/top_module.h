@@ -7,14 +7,28 @@
 class TopModule {
 public:
     virtual ~TopModule() = default;
-    TopPorts* topPorts;
-    virtual void init() = 0;
+    TopModule() = default;
+
+    void init() {
+        createTopPorts();
+        createExternalModule();
+    }
+    void cleanup() {
+        deleteExternalModule();
+    }
+
+    TopPorts* topPorts = nullptr;
+    virtual void resetSimWorker() = 0;
     virtual void evalE() {
         eHandle->eval();
     }
     virtual void eval() = 0;
 protected:
-    ModuleHandle* eHandle;
+    virtual void createTopPorts() = 0;
+    virtual void createExternalModule() = 0;
+    virtual void deleteExternalModule() = 0;
+protected:
+    ModuleHandle* eHandle = nullptr;
 };
 
 #endif

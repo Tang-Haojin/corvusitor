@@ -17,7 +17,7 @@ int main(int argc, char* argv[]) {
   cxxopts::Options options("Corvusitor", std::string(argv[0]) + ": Generate a wrapper for compiled corvus-compiler output");
   options.add_options()
     ("m,modules-dir", "Path to the modules directory", cxxopts::value<std::string>()->default_value("."))
-    ("o,output-name", "Output C++ implementation file name", cxxopts::value<std::string>()->default_value("VCorvusTopWrapper_generated.cpp"))
+    ("o,output-name", "Output base name (corvus artifacts)", cxxopts::value<std::string>()->default_value("corvus_codegen"))
     ("h,help", "Print usage")
     ;
   auto result = options.parse(argc, argv);
@@ -43,14 +43,9 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
-  // Generate all connection code (CPP + H)
-  std::string output_cpp = result["output-name"].as<std::string>();
-  std::string output_base = output_cpp.substr(0, output_cpp.rfind(".cpp"));
-  std::string output_h = output_base + ".h";
-  std::string output_mk = output_base + ".mk";
-
-  std::cout << "\nOutput CPP file: " << output_cpp << "\n";
-  std::cout << "Output H file: " << output_h << "\n";
+  // Generate corvus artifacts
+  std::string output_base = result["output-name"].as<std::string>();
+  std::cout << "\nOutput base: " << output_base << "\n";
 
   if (!generator.generate_all(output_base)) {
     std::cerr << "\nError: Failed to generate code\n";
@@ -63,22 +58,11 @@ int main(int argc, char* argv[]) {
   std::cout << "\n====================================================\n";
   std::cout << "  Generation Successful!\n";
   std::cout << "====================================================\n";
+  std::cout << "\nArtifacts:\n";
+  std::cout << "  - " << output_base << "_corvus.json\n";
   std::cout << "\nNext steps:\n";
-  std::cout << "  1. Review generated files:\n";
-  std::cout << "     - " << output_cpp << "\n";
-  std::cout << "     - " << output_h << "\n";
-  std::cout << "     - " << output_mk << "\n";
-
-  // Extract output directory
-  std::string output_dir = output_cpp.substr(0, output_cpp.rfind('/') + 1);
-  std::cout << "\n  2. Create your main source file (e.g., test_wrapper.cpp) in:\n";
-  std::cout << "     " << output_dir << "\n";
-  std::cout << "\n  3. Build with auto-generated Makefile:\n";
-  std::cout << "     cd " << output_dir << "\n";
-  std::cout << "     make -f " << output_mk << "\n";
-  std::cout << "\n  4. Or build with custom main file:\n";
-  std::cout << "     make -f " << output_mk << " TARGET=my_sim MAIN_SRC=my_sim.cpp\n";
-  std::cout << "\n  5. Run 'make -f " << output_mk << " help' for more options\n";
+  std::cout << "  1) Inspect the JSON to feed downstream corvus codegen\n";
+  std::cout << "  2) Point the code emitter to this analysis\n";
   std::cout << "\n";
 
   return 0;

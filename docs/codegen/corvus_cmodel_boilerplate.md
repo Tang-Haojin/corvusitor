@@ -36,7 +36,7 @@
 # CorvusTopModule
 
 - 使用 boilerplate/corvus/corvus_top_module.h 和 boilerplate/corvus/corvus_top_module.cpp 提供的骨架
-- 构造函数传入 CorvusTopSynctreeEndpoint* 以及 mBus/sBus 的 vector<CorvusBusEndpoint*>，类中持有这些成员供生成的函数调用
+- 构造函数传入 CorvusTopSynctreeEndpoint* 以及 mBus 的 vector<CorvusBusEndpoint*>，类中持有这些成员供生成的函数调用
 - 声明所有的虚方法，但不需要给出定义实现，之后由代码生成器生成具体实现；其中 `createExternalModule`/`deleteExternalModule` 负责创建和销毁 `eHandle`，通过 `init`/`cleanup` 触发；`resetSimWorker` 替代原 `init` 行为，`clearMBusRecvBuffer` 已默认（私有）清空 mBusEndpoints
 
 # CorvusCModelSimWorkerRunner

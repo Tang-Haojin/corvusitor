@@ -22,7 +22,7 @@
 - 文件：`boilerplate/corvus/corvus_top_module.{h,cpp}`
 - 类：`CorvusTopModule`
 - 生成器需补全以下虚方法的实现：`createExternalModule`（负责创建并填充 `eHandle`）、`deleteExternalModule`（负责释放它）、`sendIAndEOutput`、`loadOAndEInput`、`resetSimWorker`（替代原 `init` 行为）。`clearMBusRecvBuffer` 已默认清空所有 mBusEndpoints，方法为私有。
-- 提供 `init`/`cleanup` 以调用外设模块与顶层端口的创建/销毁逻辑；构造函数仅接收同步树端点以及 m/s 总线端点（均为裸指针），不会自动调用创建逻辑。
+- 提供 `init`/`cleanup` 以调用外设模块与顶层端口的创建/销毁逻辑；构造函数仅接收同步树端点以及 mBus 总线端点（均为裸指针），不会自动调用创建逻辑。
 
 ## Worker 线程运行器
 - 文件：`boilerplate/corvus_cmodel/corvus_cmodel_sim_worker_runner.{h,cpp}`

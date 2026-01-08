@@ -10,13 +10,13 @@ CorvusSimWorker::CorvusSimWorker(CorvusSimWorkerSynctreeEndpoint* simCoreSynctre
 
 void CorvusSimWorker::loop() {
     while(1) {
-        loadBusCInputs();
+        loadRemoteCInputs();
         cModule->eval();
-        sendCOutputsToBus();
+        sendRemoteCOutputs();
         raiseCFinishFlag();
         loadSInputs();
         sModule->eval();
-        sendSOutputs();
+        sendRemoteSOutputs();
         raiseSFinishFlag();
         loadLocalCInputs();
         while(!isMasterSyncFlagRaised());

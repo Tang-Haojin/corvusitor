@@ -10,11 +10,12 @@ public:
     TopModule() = default;
 
     void init() {
-        createTopPorts();
-        createExternalModule();
+        topPorts = createTopPorts();
+        eHandle = createExternalModule();
     }
     void cleanup() {
         deleteExternalModule();
+        deleteTopPorts();
     }
 
     TopPorts* topPorts = nullptr;
@@ -24,8 +25,9 @@ public:
     }
     virtual void eval() = 0;
 protected:
-    virtual void createTopPorts() = 0;
-    virtual void createExternalModule() = 0;
+    virtual TopPorts* createTopPorts() = 0;
+    virtual void deleteTopPorts() = 0;
+    virtual ModuleHandle* createExternalModule() = 0;
     virtual void deleteExternalModule() = 0;
 protected:
     ModuleHandle* eHandle = nullptr;

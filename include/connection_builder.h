@@ -2,6 +2,7 @@
 #define CONNECTION_BUILDER_H
 
 #include "module_info.h"
+#include "connection_analysis.h"
 #include <vector>
 #include <map>
 #include <string>
@@ -34,6 +35,9 @@ public:
 
   // Build connection relationships between all modules
   std::vector<PortConnection> build(const std::vector<ModuleInfo>& modules);
+
+  // Perform corvus-style connection analysis and classification
+  ConnectionAnalysis analyze(const std::vector<ModuleInfo>& modules);
 
 private:
   // Group all ports by port name

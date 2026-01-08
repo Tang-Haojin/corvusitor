@@ -10,8 +10,7 @@
 class CorvusTopModule : public TopModule {
 public:
     CorvusTopModule(CorvusTopSynctreeEndpoint* masterSynctreeEndpoint,
-                    std::vector<CorvusBusEndpoint*> mBusEndpoints,
-                    std::vector<CorvusBusEndpoint*> sBusEndpoints);
+                    std::vector<CorvusBusEndpoint*> mBusEndpoints);
     void resetSimWorker() override;
     void eval() override;
     void evalE() override;
@@ -19,7 +18,6 @@ public:
 protected:
     CorvusTopSynctreeEndpoint* synctreeEndpoint = nullptr;
     std::vector<CorvusBusEndpoint*> mBusEndpoints;
-    std::vector<CorvusBusEndpoint*> sBusEndpoints;
     virtual void sendIAndEOutput() = 0;
     virtual void loadOAndEInput() = 0;
 

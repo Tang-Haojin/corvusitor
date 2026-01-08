@@ -77,7 +77,6 @@ std::vector<PortConnection> ConnectionBuilder::build(const std::vector<ModuleInf
     std::map<const ModuleInfo*, const ModuleInfo*> receiver_to_driver;
 
     for (size_t i = 0; i < group.receiver_ports.size(); i++) {
-      const PortInfo* recv_port = group.receiver_ports[i];
       const ModuleInfo* recv_module = group.receiver_modules[i];
 
       // Find a suitable driver source
@@ -305,4 +304,120 @@ bool ConnectionBuilder::is_width_compatible(const PortInfo& p1, const PortInfo& 
   }
 
   return true;
+}
+
+namespace {
+const PortInfo* find_port(const ModuleInfo* module, const std::string& port_name) {
+  if (!module) return nullptr;
+  for (const auto& port : module->ports) {
+    if (port.name == port_name) {
+      return &port;
+    }
+  }
+  return nullptr;
+}
+
+ClassifiedConnection make_connection(const PortConnection& conn) {
+  ClassifiedConnection classified;
+  classified.port_name = conn.port_name;
+  classified.width = conn.width;
+  classified.width_type = conn.width_type;
+  if (conn.driver_module) {
+    classified.driver.module = conn.driver_module;
+    classified.driver.port = find_port(conn.driver_module, conn.port_name);
+  }
+  for (const auto* recv : conn.receiver_modules) {
+    SignalEndpoint endpoint;
+    endpoint.module = recv;
+    endpoint.port = find_port(recv, conn.port_name);
+    classified.receivers.push_back(endpoint);
+  }
+  return classified;
+}
+} // namespace
+
+ConnectionAnalysis ConnectionBuilder::analyze(const std::vector<ModuleInfo>& modules) {
+  ConnectionAnalysis analysis;
+  auto connections = build(modules);
+
+  // Initialize partition buckets
+  for (const auto& mod : modules) {
+    if (mod.type != ModuleType::EXTERNAL) {
+      analysis.partitions[mod.partition_id];
+    }
+  }
+
+  auto warn = [&](const std::string& msg) {
+    analysis.warnings.push_back(msg);
+  };
+
+  for (const auto& conn : connections) {
+    // Prepare a reusable view of the full connection
+    auto base = make_connection(conn);
+
+    if (conn.is_top_level_input) {
+      analysis.top_inputs.push_back(base);
+      continue;
+    }
+    if (conn.is_top_level_output) {
+      analysis.top_outputs.push_back(base);
+      continue;
+    }
+    if (!conn.driver_module) {
+      warn("Connection without driver: " + conn.port_name);
+      continue;
+    }
+
+    auto driver_type = conn.driver_module->type;
+    auto driver_pid = conn.driver_module->partition_id;
+
+    // Split per receiver to classify cleanly
+    for (const auto* recv : conn.receiver_modules) {
+      ClassifiedConnection single = base;
+      single.receivers.clear();
+      SignalEndpoint recv_ep;
+      recv_ep.module = recv;
+      recv_ep.port = find_port(recv, conn.port_name);
+      single.receivers.push_back(recv_ep);
+
+      if (!recv) {
+        warn("Null receiver in connection: " + conn.port_name);
+        continue;
+      }
+
+      if (driver_type == ModuleType::COMB) {
+        if (recv->type == ModuleType::SEQ) {
+          if (recv->partition_id != driver_pid) {
+            warn("Illegal COMB->SEQ across partitions for port '" + conn.port_name + "'");
+            continue;
+          }
+          analysis.partitions[driver_pid].local_cts_to_si.push_back(single);
+        } else if (recv->type == ModuleType::EXTERNAL) {
+          analysis.external_inputs.push_back(single); // comb -> external (Ei)
+        } else {
+          warn("Unsupported COMB receiver type for port '" + conn.port_name + "'");
+        }
+      } else if (driver_type == ModuleType::SEQ) {
+        if (recv->type != ModuleType::COMB) {
+          warn("SEQ driver port '" + conn.port_name + "' targets non-COMB receiver");
+          continue;
+        }
+        if (recv->partition_id == driver_pid) {
+          analysis.partitions[driver_pid].local_stc_to_ci.push_back(single);
+        } else {
+          analysis.partitions[driver_pid].remote_s_to_c.push_back(single);
+        }
+      } else if (driver_type == ModuleType::EXTERNAL) {
+        if (recv->type == ModuleType::COMB) {
+          analysis.external_outputs.push_back(single); // external -> comb (Eo)
+        } else {
+          warn("EXTERNAL driver port '" + conn.port_name + "' targets non-COMB receiver");
+        }
+      } else {
+        warn("Unknown driver type for port '" + conn.port_name + "'");
+      }
+    }
+  }
+
+  return analysis;
 }

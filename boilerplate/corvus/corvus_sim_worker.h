@@ -15,10 +15,10 @@ class CorvusSimWorker : public SimWorker {
         CorvusSimWorkerSynctreeEndpoint* synctreeEndpoint;
         std::vector<CorvusBusEndpoint*> mBusEndpoints;
         std::vector<CorvusBusEndpoint*> sBusEndpoints;
-        virtual void loadBusCInputs() = 0;
-        virtual void sendCOutputsToBus() = 0;
+        virtual void loadRemoteCInputs() = 0;
+        virtual void sendRemoteCOutputs() = 0;
         virtual void loadSInputs() = 0;
-        virtual void sendSOutputs() = 0;
+        virtual void sendRemoteSOutputs() = 0;
         virtual void loadLocalCInputs() = 0;
     private:
         CorvusSynctreeEndpoint::FlipFlag cFinishFlag = CorvusSynctreeEndpoint::FlipFlag::PENDING;

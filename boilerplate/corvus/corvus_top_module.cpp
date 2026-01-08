@@ -2,11 +2,9 @@
 #include <utility>
 
 CorvusTopModule::CorvusTopModule(CorvusTopSynctreeEndpoint* masterSynctreeEndpoint,
-                                 std::vector<CorvusBusEndpoint*> mBusEndpoints,
-                                 std::vector<CorvusBusEndpoint*> sBusEndpoints)
+                                 std::vector<CorvusBusEndpoint*> mBusEndpoints)
     : synctreeEndpoint(masterSynctreeEndpoint),
-      mBusEndpoints(std::move(mBusEndpoints)),
-      sBusEndpoints(std::move(sBusEndpoints)) {
+      mBusEndpoints(std::move(mBusEndpoints)) {
 }
 
 void CorvusTopModule::resetSimWorker() {

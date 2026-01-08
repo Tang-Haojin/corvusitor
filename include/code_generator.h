@@ -9,6 +9,7 @@
 #include "module_info.h"
 #include "connection_builder.h"
 #include "simulator_interface.h"
+#include "connection_analysis.h"
 
 /**
  * CodeGenerator - Generate VCorvusTopWrapper connection propagation code
@@ -21,6 +22,16 @@
  */
 class CodeGenerator {
 public:
+  /**
+   * Target generator abstraction
+   */
+  class TargetGenerator {
+  public:
+    virtual ~TargetGenerator() = default;
+    virtual bool generate(const ConnectionAnalysis& analysis,
+                          const std::string& output_base) = 0;
+  };
+
   /**
    * Constructor with automatic simulator detection
    * @param modules_dir Directory containing simulator output
@@ -49,36 +60,6 @@ public:
   bool generate_all(const std::string& output_file_base);
 
   /**
-   * Generate Makefile
-   * @param output_file_base Makefile base name without extension
-   * @return Returns true on success
-   */
-  bool generate_makefile(const std::string& output_file_base);
-
-  /**
-   * Generate a single propagate function
-   * @param connections Connection list
-   * @param function_name Function name
-   * @param comment Function comment
-   */
-  std::string generate_propagate_function(
-    const std::vector<PortConnection>& connections,
-    const std::string& function_name,
-    const std::string& comment
-  );
-
-  /**
-   * Generate top-level input/output port declarations (for header file)
-   * @param top_inputs Top-level input connection list
-   * @param top_outputs Top-level output connection list
-   * @return Port declaration code (C++ public member variables)
-   */
-  std::string generate_port_declarations(
-    const std::vector<PortConnection>& top_inputs,
-    const std::vector<PortConnection>& top_outputs
-  );
-
-  /**
    * Print statistics
    */
   void print_statistics() const;
@@ -86,29 +67,15 @@ public:
 private:
   std::string modules_dir_;  // Module directory
   std::map<std::string, ModuleInfo> modules_;  // Module information
-  ConnectionBuilder* conn_builder_;  // Connection builder
+  std::unique_ptr<ConnectionBuilder> conn_builder_;  // Connection builder
+  ConnectionAnalysis analysis_;      // Corvus-classified connection graph
 
   // Connection statistics
   int total_connections_;
   int vlwide_ports_;
   int top_outputs_;
 
-  /**
-   * Generate a single assignment statement
-   * @param conn Connection information
-   * @return C++ assignment statement
-   */
-  std::string generate_assignment(const PortConnection& conn);
-
-  /**
-   * Check if type is VlWide
-   */
-  bool is_vlwide_type(const std::string& type_str) const;
-
-  /**
-   * Extract VlWide width parameter
-   */
-  int extract_vlwide_width(const std::string& type_str) const;
+  std::unique_ptr<TargetGenerator> target_generator_;
 };
 
 #endif // CODE_GENERATOR_H

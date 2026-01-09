@@ -9,7 +9,9 @@
 class CorvusGenerator : public CodeGenerator::TargetGenerator {
 public:
   bool generate(const ConnectionAnalysis& analysis,
-                const std::string& output_base) override;
+                const std::string& output_base,
+                int mbus_count,
+                int sbus_count) override;
 };
 
 #endif // CORVUS_GENERATOR_H

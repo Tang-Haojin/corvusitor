@@ -29,14 +29,18 @@ public:
   public:
     virtual ~TargetGenerator() = default;
     virtual bool generate(const ConnectionAnalysis& analysis,
-                          const std::string& output_base) = 0;
+                          const std::string& output_base,
+                          int mbus_count,
+                          int sbus_count) = 0;
   };
 
   /**
    * Constructor with automatic simulator detection
    * @param modules_dir Directory containing simulator output
    */
-  CodeGenerator(const std::string& modules_dir);
+  CodeGenerator(const std::string& modules_dir,
+                int mbus_count = 1,
+                int sbus_count = 1);
 
   /**
    * Constructor with explicit simulator type
@@ -44,7 +48,9 @@ public:
    * @param simulator_type Type of simulator to use
    */
   CodeGenerator(const std::string& modules_dir, 
-                SimulatorFactory::SimulatorType simulator_type);
+                SimulatorFactory::SimulatorType simulator_type,
+                int mbus_count = 1,
+                int sbus_count = 1);
 
   /**
    * Load module and connection data
@@ -67,6 +73,7 @@ public:
 private:
   std::string modules_dir_;  // Module directory
   std::map<std::string, ModuleInfo> modules_;  // Module information
+  std::vector<ModuleInfo> modules_list_; // Persistent storage for analysis pointers
   std::unique_ptr<ConnectionBuilder> conn_builder_;  // Connection builder
   ConnectionAnalysis analysis_;      // Corvus-classified connection graph
 
@@ -75,6 +82,8 @@ private:
   int vlwide_ports_;
   int top_outputs_;
 
+  int mbus_count_;
+  int sbus_count_;
   std::unique_ptr<TargetGenerator> target_generator_;
 };
 

@@ -82,20 +82,20 @@
         - 从 MBus 接收各 SimWorker 发送的 O，写入 TopPorts
         - 从 MBus 接收各 SimWorker 发送的 Ei，写入 external 模块
     - 重载时注意指针的多态转换
-    - 生成一组继承自 CorvusSimWorker 的派生类 CorvusSimWorkerGenP0 .. CorvusSimWorkerGenPN-1，对于每个 Pi
-        - 模块实例化
-            - 重载 createSimModules() = 0; 虚方法，创建 corvus_comb_Pi 和 corvus_seq_Pi 实例并返回指针，挂载到 cModule/sModule
-            - 重载 deleteSimModules() = 0; 虚方法，删除上述实例
-        - 重载 loadBusCInputs()
-            - 从 MBus 接收 TopModule 发送的 C 输入，设置 cModule 的输入
-            - 从 SBus 接收其他 SimWorker 发送的 remoteSjtCi，设置 cModule 的输入
-        - 重载 sendCOutputsToBus()
-            - 将 cModule 的 C 输出中属于 O/Ei 方向的部分通过 MBus 发送到 TopModule
-            - 将 cModule 的 C 输出中属于 remoteCiStj 方向的部分通过 SBus 发送到目标 SimWorker
-        - 重载 loadSInputs()
-            - Si 的 input 只来自本 worker 内部
-            - 从 Ci 的 output 拷贝 localCtSi 到 Si 的 input
-        - 重载 sendSOutputs()
-            - 将 sModule 的 S 输出中属于 remoteSitCj 方向的部分通过 SBus 发送到目标 SimWorker
-        - 重载 loadLocalCInputs()
-            - 从 sModule 的 S 输出中拷贝 localStCi 到 cModule 的 C 输入
+- 生成一组继承自 CorvusSimWorker 的派生类 CorvusSimWorkerGenP0 .. CorvusSimWorkerGenPN-1，对于每个 Pi
+    - 模块实例化
+        - 重载 createSimModules() = 0; 虚方法，创建 corvus_comb_Pi 和 corvus_seq_Pi 实例并返回指针，挂载到 cModule/sModule
+        - 重载 deleteSimModules() = 0; 虚方法，删除上述实例
+    - 重载 loadBusCInputs()
+        - 从 MBus 接收 TopModule 发送的 C 输入，设置 cModule 的输入
+        - 从 SBus 接收其他 SimWorker 发送的 remoteSjtCi，设置 cModule 的输入
+    - 重载 sendCOutputsToBus()
+        - 将 cModule 的 C 输出中属于 O/Ei 方向的部分通过 MBus 发送到 TopModule
+        - 将 cModule 的 C 输出中属于 remoteCiStj 方向的部分通过 SBus 发送到目标 SimWorker
+    - 重载 loadSInputs()
+        - Si 的 input 只来自本 worker 内部
+        - 从 Ci 的 output 拷贝 localCtSi 到 Si 的 input
+    - 重载 sendSOutputs()
+        - 将 sModule 的 S 输出中属于 remoteSitCj 方向的部分通过 SBus 发送到目标 SimWorker
+    - 重载 loadLocalCInputs()
+        - 从 sModule 的 S 输出中拷贝 localStCi 到 cModule 的 C 输入

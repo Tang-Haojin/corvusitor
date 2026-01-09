@@ -18,6 +18,8 @@ int main(int argc, char* argv[]) {
   options.add_options()
     ("m,modules-dir", "Path to the modules directory", cxxopts::value<std::string>()->default_value("."))
     ("o,output-name", "Output base name (corvus artifacts)", cxxopts::value<std::string>()->default_value("corvus_codegen"))
+    ("mbus-count", "Number of MBus endpoints to target (compile-time routing)", cxxopts::value<int>()->default_value("8"))
+    ("sbus-count", "Number of SBus endpoints to target (compile-time routing)", cxxopts::value<int>()->default_value("8"))
     ("h,help", "Print usage")
     ;
   auto result = options.parse(argc, argv);
@@ -33,9 +35,11 @@ int main(int argc, char* argv[]) {
   // Module directory
   std::string modules_dir = result["modules-dir"].as<std::string>();
   std::cout << "\nModule directory: " << modules_dir << "\n";
+  int mbus_count = result["mbus-count"].as<int>();
+  int sbus_count = result["sbus-count"].as<int>();
 
   // Create code generator
-  CodeGenerator generator(modules_dir);
+  CodeGenerator generator(modules_dir, mbus_count, sbus_count);
 
   // Load module and connection data
   if (!generator.load_data()) {
@@ -60,9 +64,10 @@ int main(int argc, char* argv[]) {
   std::cout << "====================================================\n";
   std::cout << "\nArtifacts:\n";
   std::cout << "  - " << output_base << "_corvus.json\n";
+  std::cout << "  - " << output_base << "_corvus_gen.h\n";
   std::cout << "\nNext steps:\n";
   std::cout << "  1) Inspect the JSON to feed downstream corvus codegen\n";
-  std::cout << "  2) Point the code emitter to this analysis\n";
+  std::cout << "  2) Include the generated header to instantiate corvus top/worker classes\n";
   std::cout << "\n";
 
   return 0;

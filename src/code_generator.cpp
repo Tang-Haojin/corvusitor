@@ -1,19 +1,26 @@
 #include "code_generator.h"
 #include "module_parser.h"
 #include "corvus_generator.h"
+#include <algorithm>
 #include <iostream>
 
-CodeGenerator::CodeGenerator(const std::string& modules_dir)
+CodeGenerator::CodeGenerator(const std::string& modules_dir,
+                             int mbus_count,
+                             int sbus_count)
   : modules_dir_(modules_dir),
     conn_builder_(nullptr),
     total_connections_(0),
     vlwide_ports_(0),
     top_outputs_(0),
+    mbus_count_(std::max(1, mbus_count)),
+    sbus_count_(std::max(1, sbus_count)),
     target_generator_(new CorvusGenerator()) {}
 
 CodeGenerator::CodeGenerator(const std::string& modules_dir,
-                             SimulatorFactory::SimulatorType /* simulator_type */)
-  : CodeGenerator(modules_dir) {}
+                             SimulatorFactory::SimulatorType /* simulator_type */,
+                             int mbus_count,
+                             int sbus_count)
+  : CodeGenerator(modules_dir, mbus_count, sbus_count) {}
 
 bool CodeGenerator::load_data() {
   std::cout << "\n=== Loading Module Data ===" << std::endl;
@@ -22,12 +29,12 @@ bool CodeGenerator::load_data() {
   auto discovery_results = manager.discover_all_modules(modules_dir_);
   manager.print_discovery_statistics();
 
+  modules_list_.clear();
   if (discovery_results.empty()) {
     std::cerr << "No modules found in directory: " << modules_dir_ << std::endl;
     return false;
   }
 
-  std::vector<ModuleInfo> modules_list;
   for (const auto& result : discovery_results) {
     std::cout << "  Parsing " << result.header_path << " [" << result.simulator_name << "]..." << std::endl;
 
@@ -44,14 +51,14 @@ bool CodeGenerator::load_data() {
     }
 
     modules_[result.module_name] = info;
-    modules_list.push_back(info);
+    modules_list_.push_back(info);
     std::cout << "    -> " << info.ports.size() << " ports" << std::endl;
   }
 
   // Build corvus-aware connection analysis
   std::cout << "\n=== Building Connections (Corvus) ===" << std::endl;
   conn_builder_ = std::unique_ptr<ConnectionBuilder>(new ConnectionBuilder());
-  analysis_ = conn_builder_->analyze(modules_list);
+  analysis_ = conn_builder_->analyze(modules_list_);
   total_connections_ = static_cast<int>(
       analysis_.top_inputs.size() +
       analysis_.top_outputs.size() +
@@ -85,7 +92,7 @@ bool CodeGenerator::generate_all(const std::string& output_file_base) {
   }
 
   std::cout << "\n=== Generating Corvus artifacts ===" << std::endl;
-  return target_generator_->generate(analysis_, output_file_base);
+  return target_generator_->generate(analysis_, output_file_base, mbus_count_, sbus_count_);
 }
 
 void CodeGenerator::print_statistics() const {

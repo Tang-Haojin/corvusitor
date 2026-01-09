@@ -3,6 +3,8 @@
 
 CXX = g++
 CXXFLAGS = -std=c++11 -Wall -Wextra -g -I./include
+MBUS_COUNT ?= 8
+SBUS_COUNT ?= 3
 
 ## Source directories
 SRC_DIR = src
@@ -43,13 +45,22 @@ TEST_CONN_ANALYSIS_BIN = $(BUILD_DIR)/test_connection_analysis
 TEST_CONN_ANALYSIS_SRC = $(TEST_DIR)/test_connection_analysis.cpp
 TEST_CORVUS_GEN_BIN = $(BUILD_DIR)/test_corvus_generator
 TEST_CORVUS_GEN_SRC = $(TEST_DIR)/test_corvus_generator.cpp
+TEST_CORVUS_SLOTS_BIN = $(BUILD_DIR)/test_corvus_slots
+TEST_CORVUS_SLOTS_SRC = $(TEST_DIR)/test_corvus_slots.cpp
+TEST_CORVUS_YUQUAN_BIN = $(BUILD_DIR)/test_corvus_yuquan
+TEST_CORVUS_YUQUAN_SRC = $(TEST_DIR)/test_corvus_yuquan.cpp
+YUQUAN_DIR = $(TEST_DIR)/YuQuan
+YUQUAN_SIM_DIR = $(YUQUAN_DIR)/build/sim
+YUQUAN_SENTINEL = $(YUQUAN_SIM_DIR)/verilator-compile-corvus_external/Vcorvus_external.h
+YUQUAN_MAKE = $(MAKE) -C $(YUQUAN_DIR)
+YUQUAN_CORVUS_PATH ?= $(if $(CORVUS_PATH),$(CORVUS_PATH),corvus-compiler)
 
 ## Default target
 .PHONY: all
 CORVUSITOR_BIN = $(BUILD_DIR)/corvusitor
 MAIN_SRC = $(SRC_DIR)/main.cpp
 
-all: $(TEST_PARSER_BIN) $(TEST_CONN_BIN) $(TEST_CODEGEN_BIN) $(TEST_CONN_ANALYSIS_BIN) $(TEST_CORVUS_GEN_BIN) $(CORVUSITOR_BIN)
+all: $(TEST_PARSER_BIN) $(TEST_CONN_BIN) $(TEST_CODEGEN_BIN) $(TEST_CONN_ANALYSIS_BIN) $(TEST_CORVUS_GEN_BIN) $(TEST_CORVUS_SLOTS_BIN) $(TEST_CORVUS_YUQUAN_BIN) $(CORVUSITOR_BIN)
 ## Build main program
 $(CORVUSITOR_BIN): $(OBJ_FILES) $(MAIN_SRC) $(HEADERS)
 	$(CXX) $(CXXFLAGS) $(OBJ_FILES) $(MAIN_SRC) -o $@
@@ -95,6 +106,12 @@ $(TEST_CONN_ANALYSIS_BIN): $(OBJ_FILES) $(TEST_CONN_ANALYSIS_SRC) $(HEADERS)
 $(TEST_CORVUS_GEN_BIN): $(OBJ_FILES) $(TEST_CORVUS_GEN_SRC) $(HEADERS)
 	$(CXX) $(CXXFLAGS) $(OBJ_FILES) $(TEST_CORVUS_GEN_SRC) -o $@
 
+$(TEST_CORVUS_SLOTS_BIN): $(OBJ_FILES) $(TEST_CORVUS_SLOTS_SRC) $(HEADERS)
+	$(CXX) $(CXXFLAGS) $(OBJ_FILES) $(TEST_CORVUS_SLOTS_SRC) -o $@
+
+$(TEST_CORVUS_YUQUAN_BIN): $(OBJ_FILES) $(TEST_CORVUS_YUQUAN_SRC) $(HEADERS)
+	$(CXX) $(CXXFLAGS) $(OBJ_FILES) $(TEST_CORVUS_YUQUAN_SRC) -o $@
+
 ## Run parser test
 .PHONY: test
 test: $(TEST_PARSER_BIN)
@@ -119,6 +136,21 @@ test_codegen: $(TEST_CODEGEN_BIN)
 .PHONY: test_corvus_gen
 test_corvus_gen: $(TEST_CORVUS_GEN_BIN)
 	./$(TEST_CORVUS_GEN_BIN)
+
+.PHONY: test_corvus_slots
+test_corvus_slots: $(TEST_CORVUS_SLOTS_BIN)
+	./$(TEST_CORVUS_SLOTS_BIN)
+
+.PHONY: test_corvus_yuquan
+test_corvus_yuquan: yuquan_build $(TEST_CORVUS_YUQUAN_BIN)
+	./$(TEST_CORVUS_YUQUAN_BIN) --mbus-count=$(MBUS_COUNT) --sbus-count=$(SBUS_COUNT)
+
+# Ensure YuQuan verilator artifacts exist before running the integration test.
+$(YUQUAN_SENTINEL):
+	$(YUQUAN_MAKE) CORVUS=1 CORVUS_PATH=$(YUQUAN_CORVUS_PATH) verilate-archive
+
+.PHONY: yuquan_build
+yuquan_build: $(YUQUAN_SENTINEL)
 
 ## Clean build artifacts
 .PHONY: clean

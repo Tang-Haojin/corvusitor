@@ -1,12 +1,12 @@
-#ifndef CORVUS_CODEGEN_UTILS_H
-#define CORVUS_CODEGEN_UTILS_H
+#ifndef CORVUS_HELPER_H
+#define CORVUS_HELPER_H
 
 #include <algorithm>
 #include <cstdint>
 #include <vector>
 
 // Shared helpers for generated corvus code.
-namespace corvus_codegen_detail {
+namespace corvus_helper {
 
 inline uint64_t mask_bits(int bits) {
   if (bits <= 0) return 0ULL;
@@ -109,6 +109,6 @@ inline void apply_to_wide(const SlotDecoder& dec, uint32_t* words, int wordCount
   }
 }
 
-} // namespace corvus_codegen_detail
+} // namespace corvus_helper
 
-#endif // CORVUS_CODEGEN_UTILS_H
+#endif // CORVUS_HELPER_H

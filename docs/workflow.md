@@ -1,7 +1,7 @@
 # Corvusitor 工作流
 
 ## 前置条件
-- 已生成的仿真模块（verilator/gsim）：`corvus_comb_P*`、`corvus_seq_P*`、可选 `corvus_external`，端口名称/位宽满足 corvus 约束（见 `docs/architecture.md#输入约束来自仿真输出`）。
+- 已生成的 Verilator 仿真模块（当前仅实现 Verilator，其余仿真器支持尚未实现）：`corvus_comb_P*`、`corvus_seq_P*`、可选 `corvus_external`，端口名称/位宽满足 corvus 约束（见 `docs/architecture.md#输入约束来自仿真输出`）。
 - 可选：配置 `MBUS_COUNT` / `SBUS_COUNT`（编译期总线端点数）。
 
 ## 使用步骤
@@ -14,23 +14,24 @@
   --output-dir build \
   --output-name corvus_codegen \
   --mbus-count 8 \
-  --sbus-count 8
+  --sbus-count 8 \
+  --target corvus            # 或 cmodel，默认为 corvus
 ```
 3) 产物  
    - `<output>_corvus.json`：`ConnectionAnalysis` 快照，可作为其他生成/检查输入。  
    - `C<output>TopModuleGen.{h,cpp}`：TopPorts/TopModule 实现。  
    - `C<output>SimWorkerGenP<ID>.{h,cpp>`：每个分区一个 worker 实现。  
    - `C<output>CorvusGen.h`：聚合头，包含所有 top/worker 头。  
-   - 若选择 cmodel 目标：额外生成 `C<output>CModelGen.h`（CModel 入口）。 
+   - 选择 `--target cmodel` 时额外生成 `C<output>CModelGen.h`（CModel 入口）。 
 
 > 说明：`--output-dir` 控制输出目录，`--output-name` 控制输出前缀（决定类名/文件名中的 `<output>` 部分），二者拼成完整路径，不再将目录与名称混用。生成文件名与类名保持一致的驼峰风格，便于跨平台。
 
 ## 运行时数据流（一个周期内）
 - Top → Worker（MBus）：`sendIAndEOutput` 将 I/Eo 按 slot+chunk 编码（round-robin 分配到 mBusEndpoints），`targetId` 为目标分区+1。
-- Worker → Top（MBus）：`sendCOutputsToBus` 将 O/Ei 发送到 `targetId=0`；Top 在 `loadOAndEInput` 解码写回 TopPorts / external。
-- Worker ↔ Worker（SBus）：`sendSOutputs` 将 `remote_s_to_c` 发送到目标分区；`loadBusCInputs`/`loadSInputs` 轮询 sBusEndpoints 解码拼装。
+- Worker → Top（MBus）：`sendRemoteCOutputs` 将 O/Ei 发送到 `targetId=0`；Top 在 `loadOAndEInput` 解码写回 TopPorts / external。
+- Worker ↔ Worker（SBus）：`sendRemoteSOutputs` 将 `remote_s_to_c` 发送到目标分区；`loadRemoteCInputs`/`loadSInputs` 轮询 mBus/sBus 端点解码拼装。
 - 本地直连：`loadSInputs` 负责 Ct→Si 拷贝，`loadLocalCInputs` 负责 St→Ci 拷贝，避免上总线。
-- 接收端必须耗尽所有端点的 `bufferCnt`，基于 slotId+chunkIdx 重组；VlWide 通过 `corvus_codegen_utils` 做跨 word 处理。
+- 接收端必须耗尽所有端点的 `bufferCnt`，基于 slotId+chunkIdx 重组；VlWide 通过 `corvus_helper` 做跨 word 处理。
 
 ## 编解码与 slot 规划细节（供调试）
 - slot 空间按“接收端”独立规划：Top/每个 Worker 只为自己要接收的信号分配 slotId；发送端按目标的 slotId 发送。

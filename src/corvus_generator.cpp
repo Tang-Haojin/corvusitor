@@ -302,7 +302,7 @@ void write_includes(std::ostream& os, const std::set<std::string>& module_header
   os << "#include \"boilerplate/common/top_ports.h\"\n";
   os << "#include \"boilerplate/corvus/corvus_top_module.h\"\n";
   os << "#include \"boilerplate/corvus/corvus_sim_worker.h\"\n";
-  os << "#include \"boilerplate/corvus/corvus_codegen_utils.h\"\n";
+  os << "#include \"boilerplate/corvus/corvus_helper.h\"\n";
   for (const auto& h : module_headers) {
     os << "#include \"" << h << "\"\n";
   }
@@ -324,7 +324,7 @@ std::string generate_top_header(const std::string& output_base,
   os << "#define " << guard << "\n\n";
   write_includes(os, module_headers);
   os << "namespace corvus_generated {\n\n";
-  os << "namespace detail = corvus_codegen_detail;\n\n";
+  os << "namespace detail = corvus_helper;\n\n";
   os << "constexpr size_t kCorvusGenMBusCount = " << mbus_count << ";\n";
   os << "constexpr size_t kCorvusGenSBusCount = " << sbus_count << ";\n\n";
 
@@ -377,7 +377,7 @@ std::string generate_top_cpp(const std::string& output_base,
   }
   os << "\nnamespace corvus_generated {\n\n";
   std::string ext_class = external_mod ? external_mod->class_name : "";
-  os << "namespace detail = corvus_codegen_detail;\n\n";
+  os << "namespace detail = corvus_helper;\n\n";
 
   os << top_class << "::" << top_class << "(CorvusTopSynctreeEndpoint* masterSynctreeEndpoint,\n";
   os << "                                     std::vector<CorvusBusEndpoint*> mBusEndpoints)\n";
@@ -567,7 +567,7 @@ std::string generate_worker_header(const std::string& output_base,
   os << "#define " << guard << "\n\n";
   write_includes(os, module_headers);
   os << "namespace corvus_generated {\n\n";
-  os << "namespace detail = corvus_codegen_detail;\n\n";
+  os << "namespace detail = corvus_helper;\n\n";
   os << "constexpr size_t kCorvusGenMBusCount = " << mbus_count << ";\n";
   os << "constexpr size_t kCorvusGenSBusCount = " << sbus_count << ";\n\n";
 
@@ -606,7 +606,7 @@ std::string generate_worker_cpp(const std::string& output_base,
     os << "#include \"" << h << "\"\n";
   }
   os << "\nnamespace corvus_generated {\n\n";
-  os << "namespace detail = corvus_codegen_detail;\n\n";
+  os << "namespace detail = corvus_helper;\n\n";
   (void)mbus_count;
   (void)sbus_count;
 

@@ -256,6 +256,12 @@ bool ConnectionBuilder::validate_connection(
   const PortGroup& group,
   std::string& error_msg
 ) {
+  // Enforce single driver per signal to match corvus input constraints.
+  if (group.driver_ports.size() > 1) {
+    error_msg = "Multiple drivers detected";
+    return false;
+  }
+
   // Check bit width consistency
   const PortInfo* reference_port = nullptr;
 

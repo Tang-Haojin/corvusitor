@@ -61,6 +61,26 @@ bool CodeGenerator::load_data() {
     std::cout << "    -> " << info.ports.size() << " ports" << std::endl;
   }
 
+  // Validate high-level module constraints (comb/seq counts, external multiplicity).
+  int comb_count = 0, seq_count = 0, external_count = 0;
+  for (const auto& mod : modules_list_) {
+    switch (mod.type) {
+    case ModuleType::COMB: ++comb_count; break;
+    case ModuleType::SEQ: ++seq_count; break;
+    case ModuleType::EXTERNAL: ++external_count; break;
+    }
+  }
+  if (comb_count != seq_count || comb_count == 0) {
+    std::cerr << "Invalid module set: comb/seq count mismatch or zero (comb="
+              << comb_count << ", seq=" << seq_count << ")" << std::endl;
+    return false;
+  }
+  if (external_count > 1) {
+    std::cerr << "Invalid module set: more than one external module found ("
+              << external_count << ")" << std::endl;
+    return false;
+  }
+
   // Build corvus-aware connection analysis
   std::cout << "\n=== Building Connections (Corvus) ===" << std::endl;
   conn_builder_ = std::unique_ptr<ConnectionBuilder>(new ConnectionBuilder());

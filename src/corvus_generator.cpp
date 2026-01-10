@@ -223,6 +223,12 @@ std::string sanitize_guard(const std::string& base) {
   return guard;
 }
 
+std::string path_basename(const std::string& path) {
+  size_t pos = path.find_last_of("/\\");
+  if (pos == std::string::npos) return path;
+  return path.substr(pos + 1);
+}
+
 std::string cpp_type_from_signal(const SignalRef& sig) {
   if (sig.driver.port) {
     return sig.driver.port->get_cpp_type();
@@ -233,45 +239,7 @@ std::string cpp_type_from_signal(const SignalRef& sig) {
   return cpp_type_from_endpoint(sig.driver, sig.width_type, sig.array_size);
 }
 
-std::string generate_header(
-  const std::string& output_base,
-  const ModuleInfo* external_mod,
-  const std::map<std::string, SignalRef>& top_inputs,
-  const std::map<std::string, SignalRef>& top_outputs,
-  const std::map<int, WorkerPlan>& workers,
-  const std::vector<TopSlot>& top_slots,
-  int top_slot_bits,
-  int mbus_count,
-  int sbus_count,
-  const std::map<int, std::vector<const TopSlot*>>& send_to_top,
-  const std::map<int, std::vector<const RemoteRecvSlot*>>& remote_send_map
-);
-
-std::string generate_header(
-  const std::string& output_base,
-  const ModuleInfo* external_mod,
-  const std::map<std::string, SignalRef>& top_inputs,
-  const std::map<std::string, SignalRef>& top_outputs,
-  const std::map<int, WorkerPlan>& workers,
-  const std::vector<TopSlot>& top_slots,
-  int top_slot_bits,
-  int mbus_count,
-  int sbus_count,
-  const std::map<int, std::vector<const TopSlot*>>& send_to_top,
-  const std::map<int, std::vector<const RemoteRecvSlot*>>& remote_send_map
-) {
-  std::set<std::string> module_headers;
-  if (external_mod) module_headers.insert(external_mod->header_path);
-  for (const auto& kv : workers) {
-    if (kv.second.comb) module_headers.insert(kv.second.comb->header_path);
-    if (kv.second.seq) module_headers.insert(kv.second.seq->header_path);
-  }
-
-  std::ostringstream os;
-  std::string guard = sanitize_guard(output_base);
-
-  os << "#ifndef " << guard << "\n";
-  os << "#define " << guard << "\n\n";
+void write_includes(std::ostream& os, const std::set<std::string>& module_headers) {
   os << "#include <algorithm>\n";
   os << "#include <cassert>\n";
   os << "#include <cstddef>\n";
@@ -289,13 +257,28 @@ std::string generate_header(
   for (const auto& h : module_headers) {
     os << "#include \"" << h << "\"\n";
   }
-  os << "\nnamespace corvus_generated {\n";
+  os << "\n";
+}
 
+std::string generate_top_header(const std::string& output_base,
+                                const ModuleInfo* external_mod,
+                                const std::map<std::string, SignalRef>& top_inputs,
+                                const std::map<std::string, SignalRef>& top_outputs,
+                                int mbus_count,
+                                int sbus_count) {
+  std::set<std::string> module_headers;
+  if (external_mod) module_headers.insert(external_mod->header_path);
+
+  std::ostringstream os;
+  std::string guard = sanitize_guard(output_base + "_TOP");
+  os << "#ifndef " << guard << "\n";
+  os << "#define " << guard << "\n\n";
+  write_includes(os, module_headers);
+  os << "namespace corvus_generated {\n\n";
   os << "namespace detail = corvus_codegen_detail;\n\n";
   os << "constexpr size_t kCorvusGenMBusCount = " << mbus_count << ";\n";
   os << "constexpr size_t kCorvusGenSBusCount = " << sbus_count << ";\n\n";
 
-  // Top module generator
   std::string ext_class = external_mod ? external_mod->class_name : "";
   os << "class CorvusTopModuleGen : public CorvusTopModule {\n";
   os << "public:\n";
@@ -309,94 +292,130 @@ std::string generate_header(
   }
   os << "  };\n\n";
   os << "  CorvusTopModuleGen(CorvusTopSynctreeEndpoint* masterSynctreeEndpoint,\n";
-  os << "                     std::vector<CorvusBusEndpoint*> mBusEndpoints)\n";
-  os << "      : CorvusTopModule(masterSynctreeEndpoint, std::move(mBusEndpoints)) {\n";
-  os << "    assert(this->mBusEndpoints.size() == kCorvusGenMBusCount && \"MBus endpoint count mismatch\");\n";
-  os << "  }\n\n";
+  os << "                     std::vector<CorvusBusEndpoint*> mBusEndpoints);\n";
   os << "protected:\n";
-  os << "  TopPorts* createTopPorts() override { return new TopPortsGen(); }\n";
-  os << "  void deleteTopPorts() override {\n";
-  os << "    delete static_cast<TopPortsGen*>(topPorts);\n";
-  os << "    topPorts = nullptr;\n";
-  os << "  }\n";
+  os << "  TopPorts* createTopPorts() override;\n";
+  os << "  void deleteTopPorts() override;\n";
+  os << "  ModuleHandle* createExternalModule() override;\n";
+  os << "  void deleteExternalModule() override;\n";
+  os << "  void sendIAndEOutput() override;\n";
+  os << "  void loadOAndEInput() override;\n";
+  os << "};\n\n";
+  os << "} // namespace corvus_generated\n";
+  os << "#endif // " << guard << "\n";
+  return os.str();
+}
+
+std::string generate_top_cpp(const std::string& output_base,
+                             const ModuleInfo* external_mod,
+                             const std::map<int, WorkerPlan>& workers,
+                             const std::vector<TopSlot>& top_slots,
+                             int top_slot_bits,
+                             int mbus_count,
+                             int sbus_count) {
+  std::set<std::string> module_headers;
+  if (external_mod) module_headers.insert(external_mod->header_path);
+  (void)mbus_count;
+  (void)sbus_count;
+
+  std::ostringstream os;
+  os << "#include \"" << path_basename(output_base + "_corvus_top.h") << "\"\n";
+  for (const auto& h : module_headers) {
+    os << "#include \"" << h << "\"\n";
+  }
+  os << "\nnamespace corvus_generated {\n\n";
+  std::string ext_class = external_mod ? external_mod->class_name : "";
+  os << "namespace detail = corvus_codegen_detail;\n\n";
+
+  os << "CorvusTopModuleGen::CorvusTopModuleGen(CorvusTopSynctreeEndpoint* masterSynctreeEndpoint,\n";
+  os << "                                     std::vector<CorvusBusEndpoint*> mBusEndpoints)\n";
+  os << "    : CorvusTopModule(masterSynctreeEndpoint, std::move(mBusEndpoints)) {\n";
+  os << "  assert(this->mBusEndpoints.size() == kCorvusGenMBusCount && \"MBus endpoint count mismatch\");\n";
+  os << "}\n\n";
+
+  os << "TopPorts* CorvusTopModuleGen::createTopPorts() { return new TopPortsGen(); }\n";
+  os << "void CorvusTopModuleGen::deleteTopPorts() {\n";
+  os << "  delete static_cast<TopPortsGen*>(topPorts);\n";
+  os << "  topPorts = nullptr;\n";
+  os << "}\n";
   if (!ext_class.empty()) {
-    os << "  ModuleHandle* createExternalModule() override {\n";
-    os << "    auto* inst = new " << ext_class << "();\n";
-    os << "    return new VerilatorModuleHandle<" << ext_class << ">(inst);\n";
+    os << "ModuleHandle* CorvusTopModuleGen::createExternalModule() {\n";
+    os << "  auto* inst = new " << ext_class << "();\n";
+    os << "  return new VerilatorModuleHandle<" << ext_class << ">(inst);\n";
+    os << "}\n";
+    os << "void CorvusTopModuleGen::deleteExternalModule() {\n";
+    os << "  auto* handle = static_cast<VerilatorModuleHandle<" << ext_class << ">*>(eHandle);\n";
+    os << "  if (handle) {\n";
+    os << "    delete handle->mp;\n";
+    os << "    delete handle;\n";
+    os << "    eHandle = nullptr;\n";
     os << "  }\n";
-    os << "  void deleteExternalModule() override {\n";
-    os << "    auto* handle = static_cast<VerilatorModuleHandle<" << ext_class << ">*>(eHandle);\n";
-    os << "    if (handle) {\n";
-    os << "      delete handle->mp;\n";
-    os << "      delete handle;\n";
-    os << "      eHandle = nullptr;\n";
-    os << "    }\n";
-    os << "  }\n";
+    os << "}\n";
   } else {
-    os << "  ModuleHandle* createExternalModule() override { return nullptr; }\n";
-    os << "  void deleteExternalModule() override { eHandle = nullptr; }\n";
+    os << "ModuleHandle* CorvusTopModuleGen::createExternalModule() { return nullptr; }\n";
+    os << "void CorvusTopModuleGen::deleteExternalModule() { eHandle = nullptr; }\n";
   }
 
   // sendIAndEOutput
-  os << "  void sendIAndEOutput() override {\n";
-  os << "    auto* ports = static_cast<TopPortsGen*>(topPorts);\n";
+  os << "void CorvusTopModuleGen::sendIAndEOutput() {\n";
+  os << "  auto* ports = static_cast<TopPortsGen*>(topPorts);\n";
   if (!ext_class.empty()) {
-    os << "    auto* extHandle = static_cast<VerilatorModuleHandle<" << ext_class << ">*>(eHandle);\n";
-    os << "    auto* ext = extHandle ? extHandle->mp : nullptr;\n";
+    os << "  auto* extHandle = static_cast<VerilatorModuleHandle<" << ext_class << ">*>(eHandle);\n";
+    os << "  auto* ext = extHandle ? extHandle->mp : nullptr;\n";
   } else {
-    os << "    void* ext = nullptr;\n";
+    os << "  void* ext = nullptr;\n";
   }
-  os << "    if (!ports) return;\n";
+  os << "  if (!ports) return;\n";
   for (const auto& kv : workers) {
     const auto& wp = kv.second;
     if (wp.downlinks.empty()) continue;
-    os << "    {\n";
-    os << "      const uint32_t targetId = " << (kv.first + 1) << ";\n";
-    os << "      const uint8_t slotBits = " << wp.mbus_slot_bits << ";\n";
+    os << "  {\n";
+    os << "    const uint32_t targetId = " << (kv.first + 1) << ";\n";
+    os << "    const uint8_t slotBits = " << wp.mbus_slot_bits << ";\n";
     for (const auto& slot : wp.downlinks) {
-      os << "      {\n";
-      os << "        CorvusBusEndpoint* ep = mBusEndpoints[" << slot.bus_index << "];\n";
-      os << "        const uint8_t dataBits = " << slot.chunk.data_bits << ";\n";
-      os << "        const uint8_t chunkBits = " << slot.chunk.chunk_bits << ";\n";
-      os << "        const uint32_t chunkCount = " << slot.chunk.chunk_count << ";\n";
-      os << "        const uint32_t slotId = " << slot.slot_id << ";\n";
+      os << "    {\n";
+      os << "      CorvusBusEndpoint* ep = mBusEndpoints[" << slot.bus_index << "];\n";
+      os << "      const uint8_t dataBits = " << slot.chunk.data_bits << ";\n";
+      os << "      const uint8_t chunkBits = " << slot.chunk.chunk_bits << ";\n";
+      os << "      const uint32_t chunkCount = " << slot.chunk.chunk_count << ";\n";
+      os << "      const uint32_t slotId = " << slot.slot_id << ";\n";
       if (slot.sig.width_type == PortWidthType::VL_W) {
         std::string src = slot.from_external ? (ext_class.empty() ? "nullptr" : ("ext ? reinterpret_cast<const uint32_t*>(&ext->" + slot.sig.name + ") : nullptr"))
                                              : ("reinterpret_cast<const uint32_t*>(&ports->" + slot.sig.name + ")");
-        os << "        const uint32_t* widePtr = " << src << ";\n";
-        os << "        if (widePtr) {\n";
-        os << "          for (uint32_t chunkIdx = 0; chunkIdx < chunkCount; ++chunkIdx) {\n";
-        os << "            uint64_t chunkData = detail::read_wide_chunk(widePtr, " << slot.sig.array_size << ", dataBits, chunkIdx);\n";
-        os << "            uint64_t payload = detail::pack_payload(slotId, chunkData, chunkIdx, slotBits, dataBits, chunkBits);\n";
-        os << "            ep->send(targetId, payload);\n";
-        os << "          }\n";
-        os << "        }\n";
-      } else {
-        std::string base = slot.from_external ? (ext_class.empty() ? "0ULL" : ("(ext ? static_cast<uint64_t>(ext->" + slot.sig.name + ") : 0ULL)"))
-                                             : ("static_cast<uint64_t>(ports->" + slot.sig.name + ")");
-        os << "        uint64_t value = " << base << ";\n";
+        os << "      const uint32_t* widePtr = " << src << ";\n";
+        os << "      if (widePtr) {\n";
         os << "        for (uint32_t chunkIdx = 0; chunkIdx < chunkCount; ++chunkIdx) {\n";
-        os << "          uint64_t chunkData = (value >> (chunkIdx * dataBits)) & detail::mask_bits(dataBits);\n";
+        os << "          uint64_t chunkData = detail::read_wide_chunk(widePtr, " << slot.sig.array_size << ", dataBits, chunkIdx);\n";
         os << "          uint64_t payload = detail::pack_payload(slotId, chunkData, chunkIdx, slotBits, dataBits, chunkBits);\n";
         os << "          ep->send(targetId, payload);\n";
         os << "        }\n";
+        os << "      }\n";
+      } else {
+        std::string base = slot.from_external ? (ext_class.empty() ? "0ULL" : ("(ext ? static_cast<uint64_t>(ext->" + slot.sig.name + ") : 0ULL)"))
+                                             : ("static_cast<uint64_t>(ports->" + slot.sig.name + ")");
+        os << "      uint64_t value = " << base << ";\n";
+        os << "      for (uint32_t chunkIdx = 0; chunkIdx < chunkCount; ++chunkIdx) {\n";
+        os << "        uint64_t chunkData = (value >> (chunkIdx * dataBits)) & detail::mask_bits(dataBits);\n";
+        os << "        uint64_t payload = detail::pack_payload(slotId, chunkData, chunkIdx, slotBits, dataBits, chunkBits);\n";
+        os << "        ep->send(targetId, payload);\n";
+        os << "      }\n";
       }
-      os << "      }\n";
+      os << "    }\n";
     }
-    os << "    }\n";
+    os << "  }\n";
   }
-  os << "  }\n";
+  os << "}\n\n";
 
   // loadOAndEInput
-  os << "  void loadOAndEInput() override {\n";
-  os << "    auto* ports = static_cast<TopPortsGen*>(topPorts);\n";
+  os << "void CorvusTopModuleGen::loadOAndEInput() {\n";
+  os << "  auto* ports = static_cast<TopPortsGen*>(topPorts);\n";
   if (!ext_class.empty()) {
-    os << "    auto* extHandle = static_cast<VerilatorModuleHandle<" << ext_class << ">*>(eHandle);\n";
-    os << "    auto* ext = extHandle ? extHandle->mp : nullptr;\n";
+    os << "  auto* extHandle = static_cast<VerilatorModuleHandle<" << ext_class << ">*>(eHandle);\n";
+    os << "  auto* ext = extHandle ? extHandle->mp : nullptr;\n";
   } else {
-    os << "    void* ext = nullptr;\n";
+    os << "  void* ext = nullptr;\n";
   }
-  os << "    const uint8_t slotBits = " << top_slot_bits << ";\n";
+  os << "  const uint8_t slotBits = " << top_slot_bits << ";\n";
   std::vector<const TopSlot*> top_direct;
   std::vector<const TopSlot*> top_decode;
   for (const auto& slot : top_slots) {
@@ -407,379 +426,351 @@ std::string generate_header(
     }
   }
   if (!top_decode.empty()) {
-    os << "    std::vector<detail::SlotDecoder> decoders;\n";
-    os << "    std::unordered_map<uint32_t, size_t> slotIndex;\n";
-    os << "    decoders.reserve(" << top_decode.size() << ");\n";
+    os << "  std::vector<detail::SlotDecoder> decoders;\n";
+    os << "  std::unordered_map<uint32_t, size_t> slotIndex;\n";
+    os << "  decoders.reserve(" << top_decode.size() << ");\n";
     for (const auto* slot : top_decode) {
-      os << "    decoders.emplace_back(" << slot->slot_id << ", " << slot->slot_bits << ", "
+      os << "  decoders.emplace_back(" << slot->slot_id << ", " << slot->slot_bits << ", "
          << slot->chunk.data_bits << ", " << slot->chunk.chunk_bits << ", " << slot->chunk.chunk_count << ");\n";
-      os << "    slotIndex[" << slot->slot_id << "] = decoders.size() - 1;\n";
+      os << "  slotIndex[" << slot->slot_id << "] = decoders.size() - 1;\n";
     }
   }
-  os << "    for (auto* ep : mBusEndpoints) {\n";
-  os << "      if (!ep) continue;\n";
-  os << "      while (ep->bufferCnt() > 0) {\n";
-  os << "        uint64_t payload = ep->recv();\n";
-  os << "        uint32_t slotId = static_cast<uint32_t>(payload & detail::mask_bits(slotBits));\n";
+  os << "  for (auto* ep : mBusEndpoints) {\n";
+  os << "    if (!ep) continue;\n";
+  os << "    while (ep->bufferCnt() > 0) {\n";
+  os << "      uint64_t payload = ep->recv();\n";
+  os << "      uint32_t slotId = static_cast<uint32_t>(payload & detail::mask_bits(slotBits));\n";
   if (!top_direct.empty()) {
-    os << "        bool handled = false;\n";
-    os << "        switch (slotId) {\n";
+    os << "      bool handled = false;\n";
+    os << "      switch (slotId) {\n";
     for (const auto* slot : top_direct) {
       std::string dest = slot->to_external
         ? (ext_class.empty() ? "" : ("ext->" + slot->sig.name))
         : ("ports->" + slot->sig.name);
-      os << "        case " << slot->slot_id << ": {\n";
-      os << "          uint64_t data = (payload >> slotBits) & detail::mask_bits(" << slot->sig.width << ");\n";
+      os << "      case " << slot->slot_id << ": {\n";
+      os << "        uint64_t data = (payload >> slotBits) & detail::mask_bits(" << slot->sig.width << ");\n";
       if (slot->to_external && ext_class.empty()) {
-        os << "          // External module not available in this build\n";
+        os << "        // External module not available in this build\n";
       } else {
-        os << "          " << dest << " = static_cast<" << cpp_type_from_signal(slot->sig)
+        os << "        " << dest << " = static_cast<" << cpp_type_from_signal(slot->sig)
            << ">(data);\n";
       }
-      os << "          handled = true;\n";
-      os << "          break;\n";
-      os << "        }\n";
+      os << "        handled = true;\n";
+      os << "        break;\n";
+      os << "      }\n";
     }
-    os << "        default: break;\n";
-    os << "        }\n";
+    os << "      default: break;\n";
+    os << "      }\n";
   }
   if (!top_decode.empty()) {
     if (!top_direct.empty()) {
-      os << "        if (handled) continue;\n";
+      os << "      if (handled) continue;\n";
     }
-    os << "        auto it = slotIndex.find(slotId);\n";
-    os << "        if (it == slotIndex.end()) continue;\n";
-    os << "        decoders[it->second].consume(payload);\n";
+    os << "      auto it = slotIndex.find(slotId);\n";
+    os << "      if (it == slotIndex.end()) continue;\n";
+    os << "      decoders[it->second].consume(payload);\n";
   }
-  os << "      }\n";
   os << "    }\n";
+  os << "  }\n";
   if (!top_decode.empty()) {
-    os << "    for (size_t idx = 0; idx < decoders.size(); ++idx) {\n";
-    os << "      if (!decoders[idx].complete()) continue;\n";
-    os << "      switch (idx) {\n";
+    os << "  for (size_t idx = 0; idx < decoders.size(); ++idx) {\n";
+    os << "    if (!decoders[idx].complete()) continue;\n";
+    os << "    switch (idx) {\n";
     size_t slot_idx = 0;
     for (const auto* slot : top_decode) {
       std::string dest = slot->to_external
         ? (ext_class.empty() ? "" : ("ext->" + slot->sig.name))
         : ("ports->" + slot->sig.name);
-      os << "      case " << slot_idx << ": {\n";
+      os << "    case " << slot_idx << ": {\n";
       if (slot->to_external && ext_class.empty()) {
-        os << "        // External module is not available; skip " << slot->sig.name << "\n";
+        os << "      // External module is not available; skip " << slot->sig.name << "\n";
       } else if (slot->sig.width_type == PortWidthType::VL_W) {
-        os << "        detail::apply_to_wide(decoders[idx], reinterpret_cast<uint32_t*>(&" << dest << "), " << slot->sig.array_size << ");\n";
+        os << "      detail::apply_to_wide(decoders[idx], reinterpret_cast<uint32_t*>(&" << dest << "), " << slot->sig.array_size << ");\n";
       } else {
-        os << "        uint64_t value = detail::assemble_scalar(decoders[idx]);\n";
-        os << "        " << dest << " = static_cast<" << cpp_type_from_signal(slot->sig) << ">(value & detail::mask_bits(" << slot->sig.width << "));\n";
+        os << "      uint64_t value = detail::assemble_scalar(decoders[idx]);\n";
+        os << "      " << dest << " = static_cast<" << cpp_type_from_signal(slot->sig) << ">(value & detail::mask_bits(" << slot->sig.width << "));\n";
       }
-      os << "        break;\n";
-      os << "      }\n";
+      os << "      break;\n";
+      os << "    }\n";
       ++slot_idx;
     }
-    os << "      default: break;\n";
-    os << "      }\n";
+    os << "    default: break;\n";
     os << "    }\n";
+    os << "  }\n";
   }
-  os << "  }\n";
-  os << "};\n\n";
-
-  // Sim worker generators
-  for (const auto& kv : workers) {
-    const auto& wp = kv.second;
-    if (!wp.comb || !wp.seq) continue;
-    os << "class CorvusSimWorkerGenP" << kv.first << " : public CorvusSimWorker {\n";
-    os << "public:\n";
-    os << "  CorvusSimWorkerGenP" << kv.first << "(CorvusSimWorkerSynctreeEndpoint* simCoreSynctreeEndpoint,\n";
-    os << "                                     std::vector<CorvusBusEndpoint*> mBusEndpoints,\n";
-    os << "                                     std::vector<CorvusBusEndpoint*> sBusEndpoints)\n";
-    os << "      : CorvusSimWorker(simCoreSynctreeEndpoint, std::move(mBusEndpoints), std::move(sBusEndpoints)) {\n";
-    os << "    assert(this->mBusEndpoints.size() == kCorvusGenMBusCount && \"MBus endpoint count mismatch\");\n";
-    os << "    assert(this->sBusEndpoints.size() == kCorvusGenSBusCount && \"SBus endpoint count mismatch\");\n";
-    os << "  }\n\n";
-    os << "protected:\n";
-    os << "  void createSimModules() override {\n";
-    os << "    cModule = new VerilatorModuleHandle<" << wp.comb->class_name << ">(new " << wp.comb->class_name << "());\n";
-    os << "    sModule = new VerilatorModuleHandle<" << wp.seq->class_name << ">(new " << wp.seq->class_name << "());\n";
-    os << "  }\n";
-    os << "  void deleteSimModules() override {\n";
-    os << "    auto* cHandle = static_cast<VerilatorModuleHandle<" << wp.comb->class_name << ">* >(cModule);\n";
-    os << "    if (cHandle) { delete cHandle->mp; delete cHandle; }\n";
-    os << "    auto* sHandle = static_cast<VerilatorModuleHandle<" << wp.seq->class_name << ">* >(sModule);\n";
-    os << "    if (sHandle) { delete sHandle->mp; delete sHandle; }\n";
-    os << "    cModule = nullptr; sModule = nullptr;\n";
-    os << "  }\n";
-
-    // loadRemoteCInputs
-    os << "  void loadRemoteCInputs() override {\n";
-    os << "    auto* combHandle = static_cast<VerilatorModuleHandle<" << wp.comb->class_name << ">* >(cModule);\n";
-    os << "    auto* comb = combHandle ? combHandle->mp : nullptr;\n";
-    os << "    if (!comb) return;\n";
-    if (!wp.downlinks.empty()) {
-      os << "    {\n";
-      os << "      const uint8_t slotBits = " << wp.mbus_slot_bits << ";\n";
-      std::vector<const DownlinkSlot*> direct_slots;
-      std::vector<const DownlinkSlot*> decode_slots;
-      for (const auto& slot : wp.downlinks) {
-        if (slot.chunk.chunk_count == 1 && slot.sig.width_type != PortWidthType::VL_W) {
-          direct_slots.push_back(&slot);
-        } else {
-          decode_slots.push_back(&slot);
-        }
-      }
-      if (!decode_slots.empty()) {
-        os << "      std::vector<detail::SlotDecoder> decoders;\n";
-        os << "      std::unordered_map<uint32_t, size_t> slotIndex;\n";
-        os << "      decoders.reserve(" << decode_slots.size() << ");\n";
-        for (const auto* slot : decode_slots) {
-          os << "      decoders.emplace_back(" << slot->slot_id << ", " << slot->slot_bits << ", "
-             << slot->chunk.data_bits << ", " << slot->chunk.chunk_bits << ", " << slot->chunk.chunk_count << ");\n";
-          os << "      slotIndex[" << slot->slot_id << "] = decoders.size() - 1;\n";
-        }
-      }
-      os << "      for (auto* ep : mBusEndpoints) {\n";
-      os << "        if (!ep) continue;\n";
-      os << "        while (ep->bufferCnt() > 0) {\n";
-      os << "          uint64_t payload = ep->recv();\n";
-      os << "          uint32_t slotId = static_cast<uint32_t>(payload & detail::mask_bits(slotBits));\n";
-      if (!direct_slots.empty()) {
-        os << "          bool handled = false;\n";
-        os << "          switch (slotId) {\n";
-        for (const auto* slot : direct_slots) {
-          os << "          case " << slot->slot_id << ": {\n";
-          os << "            uint64_t data = (payload >> slotBits) & detail::mask_bits(" << slot->sig.width << ");\n";
-          os << "            comb->" << slot->sig.name << " = static_cast<" << cpp_type_from_signal(slot->sig) << ">(data);\n";
-          os << "            handled = true;\n";
-          os << "            break;\n";
-          os << "          }\n";
-        }
-        os << "          default: break;\n";
-        os << "          }\n";
-      }
-      if (!decode_slots.empty()) {
-        if (!direct_slots.empty()) {
-          os << "          if (handled) continue;\n";
-        }
-        os << "          auto it = slotIndex.find(slotId);\n";
-        os << "          if (it == slotIndex.end()) continue;\n";
-        os << "          decoders[it->second].consume(payload);\n";
-      }
-      os << "        }\n";
-      os << "      }\n";
-      if (!decode_slots.empty()) {
-        os << "      for (size_t idx = 0; idx < decoders.size(); ++idx) {\n";
-        os << "        if (!decoders[idx].complete()) continue;\n";
-        os << "        switch (idx) {\n";
-        size_t di = 0;
-        for (const auto& slot : wp.downlinks) {
-          if (slot.chunk.chunk_count == 1 && slot.sig.width_type != PortWidthType::VL_W) { ++di; continue; }
-          os << "        case " << di << ": {\n";
-          if (slot.sig.width_type == PortWidthType::VL_W) {
-            os << "          detail::apply_to_wide(decoders[idx], reinterpret_cast<uint32_t*>(&comb->" << slot.sig.name << "), " << slot.sig.array_size << ");\n";
-          } else {
-            os << "          uint64_t value = detail::assemble_scalar(decoders[idx]);\n";
-            os << "          comb->" << slot.sig.name << " = static_cast<" << cpp_type_from_signal(slot.sig) << ">(value & detail::mask_bits(" << slot.sig.width << "));\n";
-          }
-          os << "          break;\n";
-          os << "        }\n";
-          ++di;
-        }
-        os << "        default: break;\n";
-        os << "        }\n";
-        os << "      }\n";
-      }
-      os << "    }\n";
-    }
-    if (!wp.remote_recv.empty()) {
-      os << "    {\n";
-      os << "      const uint8_t slotBits = " << wp.remote_slot_bits << ";\n";
-      std::vector<const RemoteRecvSlot*> direct_slots;
-      std::vector<const RemoteRecvSlot*> decode_slots;
-      for (const auto& slot : wp.remote_recv) {
-        if (slot.chunk.chunk_count == 1 && slot.sig.width_type != PortWidthType::VL_W) {
-          direct_slots.push_back(&slot);
-        } else {
-          decode_slots.push_back(&slot);
-        }
-      }
-      if (!decode_slots.empty()) {
-        os << "      std::vector<detail::SlotDecoder> decoders;\n";
-        os << "      std::unordered_map<uint32_t, size_t> slotIndex;\n";
-        os << "      decoders.reserve(" << decode_slots.size() << ");\n";
-        for (const auto* slot : decode_slots) {
-          os << "      decoders.emplace_back(" << slot->slot_id << ", " << slot->slot_bits << ", "
-             << slot->chunk.data_bits << ", " << slot->chunk.chunk_bits << ", " << slot->chunk.chunk_count << ");\n";
-          os << "      slotIndex[" << slot->slot_id << "] = decoders.size() - 1;\n";
-        }
-      }
-      os << "      for (auto* ep : sBusEndpoints) {\n";
-      os << "        if (!ep) continue;\n";
-      os << "        while (ep->bufferCnt() > 0) {\n";
-      os << "          uint64_t payload = ep->recv();\n";
-      os << "          uint32_t slotId = static_cast<uint32_t>(payload & detail::mask_bits(slotBits));\n";
-      if (!direct_slots.empty()) {
-        os << "          bool handled = false;\n";
-        os << "          switch (slotId) {\n";
-        for (const auto* slot : direct_slots) {
-          os << "          case " << slot->slot_id << ": {\n";
-          os << "            uint64_t data = (payload >> slotBits) & detail::mask_bits(" << slot->sig.width << ");\n";
-          os << "            comb->" << slot->sig.name << " = static_cast<" << cpp_type_from_signal(slot->sig) << ">(data);\n";
-          os << "            handled = true;\n";
-          os << "            break;\n";
-          os << "          }\n";
-        }
-        os << "          default: break;\n";
-        os << "          }\n";
-      }
-      if (!decode_slots.empty()) {
-        if (!direct_slots.empty()) {
-          os << "          if (handled) continue;\n";
-        }
-        os << "          auto it = slotIndex.find(slotId);\n";
-        os << "          if (it == slotIndex.end()) continue;\n";
-        os << "          decoders[it->second].consume(payload);\n";
-      }
-      os << "        }\n";
-      os << "      }\n";
-      if (!decode_slots.empty()) {
-        os << "      for (size_t idx = 0; idx < decoders.size(); ++idx) {\n";
-        os << "        if (!decoders[idx].complete()) continue;\n";
-        os << "        switch (idx) {\n";
-        size_t ri = 0;
-        for (const auto& slot : wp.remote_recv) {
-          if (slot.chunk.chunk_count == 1 && slot.sig.width_type != PortWidthType::VL_W) { ++ri; continue; }
-          os << "        case " << ri << ": {\n";
-          if (slot.sig.width_type == PortWidthType::VL_W) {
-            os << "          detail::apply_to_wide(decoders[idx], reinterpret_cast<uint32_t*>(&comb->" << slot.sig.name << "), " << slot.sig.array_size << ");\n";
-          } else {
-            os << "          uint64_t value = detail::assemble_scalar(decoders[idx]);\n";
-            os << "          comb->" << slot.sig.name << " = static_cast<" << cpp_type_from_signal(slot.sig) << ">(value & detail::mask_bits(" << slot.sig.width << "));\n";
-          }
-          os << "          break;\n";
-          os << "        }\n";
-          ++ri;
-        }
-        os << "        default: break;\n";
-        os << "        }\n";
-        os << "      }\n";
-      }
-      os << "    }\n";
-    }
-    os << "  }\n";
-
-    // sendRemoteCOutputs
-    os << "  void sendRemoteCOutputs() override {\n";
-    os << "    auto* combHandle = static_cast<VerilatorModuleHandle<" << wp.comb->class_name << ">* >(cModule);\n";
-    os << "    auto* comb = combHandle ? combHandle->mp : nullptr;\n";
-    os << "    if (!comb) return;\n";
-    auto top_it = send_to_top.find(kv.first);
-    if (top_it != send_to_top.end() && !top_it->second.empty()) {
-      os << "    const uint8_t slotBits = " << top_slot_bits << ";\n";
-      for (const auto* slot : top_it->second) {
-        os << "    {\n";
-        os << "      CorvusBusEndpoint* ep = mBusEndpoints[" << slot->bus_index << "];\n";
-        os << "      const uint32_t slotId = " << slot->slot_id << ";\n";
-        os << "      const uint8_t dataBits = " << slot->chunk.data_bits << ";\n";
-        os << "      const uint8_t chunkBits = " << slot->chunk.chunk_bits << ";\n";
-        os << "      const uint32_t chunkCount = " << slot->chunk.chunk_count << ";\n";
-        if (slot->sig.width_type == PortWidthType::VL_W) {
-          os << "      const uint32_t* widePtr = reinterpret_cast<const uint32_t*>(&comb->" << slot->sig.name << ");\n";
-          os << "      for (uint32_t chunkIdx = 0; chunkIdx < chunkCount; ++chunkIdx) {\n";
-          os << "        uint64_t chunkData = detail::read_wide_chunk(widePtr, " << slot->sig.array_size << ", dataBits, chunkIdx);\n";
-          os << "        uint64_t payload = detail::pack_payload(slotId, chunkData, chunkIdx, slotBits, dataBits, chunkBits);\n";
-          os << "        ep->send(0, payload);\n";
-          os << "      }\n";
-        } else {
-          os << "      uint64_t value = static_cast<uint64_t>(comb->" << slot->sig.name << ");\n";
-          os << "      for (uint32_t chunkIdx = 0; chunkIdx < chunkCount; ++chunkIdx) {\n";
-          os << "        uint64_t chunkData = (value >> (chunkIdx * dataBits)) & detail::mask_bits(dataBits);\n";
-          os << "        uint64_t payload = detail::pack_payload(slotId, chunkData, chunkIdx, slotBits, dataBits, chunkBits);\n";
-          os << "        ep->send(0, payload);\n";
-          os << "      }\n";
-        }
-        os << "    }\n";
-      }
-    }
-    os << "  }\n";
-
-    // loadSInputs (local C->S)
-    os << "  void loadSInputs() override {\n";
-    os << "    auto* combHandle = static_cast<VerilatorModuleHandle<" << wp.comb->class_name << ">* >(cModule);\n";
-    os << "    auto* seqHandle = static_cast<VerilatorModuleHandle<" << wp.seq->class_name << ">* >(sModule);\n";
-    os << "    auto* comb = combHandle ? combHandle->mp : nullptr;\n";
-    os << "    auto* seq = seqHandle ? seqHandle->mp : nullptr;\n";
-    os << "    if (!comb || !seq) return;\n";
-    for (const auto& conn : wp.local_cts) {
-      if (!conn.driver.port || conn.receivers.empty() || !conn.receivers[0].port) continue;
-      std::string src = "comb->" + conn.driver.port->name;
-      std::string dst = "seq->" + conn.receivers[0].port->name;
-      if (conn.width_type == PortWidthType::VL_W) {
-        int words = conn.driver.port ? conn.driver.port->array_size : conn.receivers[0].port->array_size;
-        os << "    for (int i = 0; i < " << words << "; ++i) { " << dst << "[i] = " << src << "[i]; }\n";
-      } else {
-        os << "    " << dst << " = " << src << ";\n";
-      }
-    }
-    os << "  }\n";
-
-    // sendRemoteSOutputs
-    os << "  void sendRemoteSOutputs() override {\n";
-    os << "    auto* seqHandle = static_cast<VerilatorModuleHandle<" << wp.seq->class_name << ">* >(sModule);\n";
-    os << "    auto* seq = seqHandle ? seqHandle->mp : nullptr;\n";
-    os << "    if (!seq) return;\n";
-    auto remote_it = remote_send_map.find(kv.first);
-    if (remote_it != remote_send_map.end()) {
-      for (const auto* slot : remote_it->second) {
-        os << "    {\n";
-        os << "      CorvusBusEndpoint* ep = sBusEndpoints[" << slot->bus_index << "];\n";
-        os << "      const uint8_t slotBits = " << slot->slot_bits << ";\n";
-        os << "      const uint32_t slotId = " << slot->slot_id << ";\n";
-        os << "      const uint8_t dataBits = " << slot->chunk.data_bits << ";\n";
-        os << "      const uint8_t chunkBits = " << slot->chunk.chunk_bits << ";\n";
-        os << "      const uint32_t chunkCount = " << slot->chunk.chunk_count << ";\n";
-        os << "      const uint32_t targetId = " << (slot->sig.receiver_pid + 1) << ";\n";
-        if (slot->sig.width_type == PortWidthType::VL_W) {
-          os << "      const uint32_t* widePtr = reinterpret_cast<const uint32_t*>(&seq->" << slot->sig.name << ");\n";
-          os << "      for (uint32_t chunkIdx = 0; chunkIdx < chunkCount; ++chunkIdx) {\n";
-          os << "        uint64_t chunkData = detail::read_wide_chunk(widePtr, " << slot->sig.array_size << ", dataBits, chunkIdx);\n";
-          os << "        uint64_t payload = detail::pack_payload(slotId, chunkData, chunkIdx, slotBits, dataBits, chunkBits);\n";
-          os << "        ep->send(targetId, payload);\n";
-          os << "      }\n";
-        } else {
-          os << "      uint64_t value = static_cast<uint64_t>(seq->" << slot->sig.name << ");\n";
-          os << "      for (uint32_t chunkIdx = 0; chunkIdx < chunkCount; ++chunkIdx) {\n";
-          os << "        uint64_t chunkData = (value >> (chunkIdx * dataBits)) & detail::mask_bits(dataBits);\n";
-          os << "        uint64_t payload = detail::pack_payload(slotId, chunkData, chunkIdx, slotBits, dataBits, chunkBits);\n";
-          os << "        ep->send(targetId, payload);\n";
-          os << "      }\n";
-        }
-        os << "    }\n";
-      }
-    }
-    os << "  }\n";
-
-    // loadLocalCInputs (S -> C feedback)
-    os << "  void loadLocalCInputs() override {\n";
-    os << "    auto* combHandle = static_cast<VerilatorModuleHandle<" << wp.comb->class_name << ">* >(cModule);\n";
-    os << "    auto* seqHandle = static_cast<VerilatorModuleHandle<" << wp.seq->class_name << ">* >(sModule);\n";
-    os << "    auto* comb = combHandle ? combHandle->mp : nullptr;\n";
-    os << "    auto* seq = seqHandle ? seqHandle->mp : nullptr;\n";
-    os << "    if (!comb || !seq) return;\n";
-    for (const auto& conn : wp.local_stc) {
-      if (!conn.driver.port || conn.receivers.empty() || !conn.receivers[0].port) continue;
-      std::string src = "seq->" + conn.driver.port->name;
-      std::string dst = "comb->" + conn.receivers[0].port->name;
-      if (conn.width_type == PortWidthType::VL_W) {
-        int words = conn.driver.port ? conn.driver.port->array_size : conn.receivers[0].port->array_size;
-        os << "    for (int i = 0; i < " << words << "; ++i) { " << dst << "[i] = " << src << "[i]; }\n";
-      } else {
-        os << "    " << dst << " = " << src << ";\n";
-      }
-    }
-    os << "  }\n";
-    os << "};\n\n";
-  }
+  os << "}\n\n";
 
   os << "} // namespace corvus_generated\n";
+  return os.str();
+}
+
+std::string generate_worker_header(const std::string& output_base,
+                                   const WorkerPlan& wp,
+                                   int mbus_count,
+                                   int sbus_count,
+                                   const std::set<std::string>& module_headers) {
+  std::ostringstream os;
+  std::string guard = sanitize_guard(output_base + "_WORKER_P" + std::to_string(wp.pid));
+  os << "#ifndef " << guard << "\n";
+  os << "#define " << guard << "\n\n";
+  write_includes(os, module_headers);
+  os << "namespace corvus_generated {\n\n";
+  os << "namespace detail = corvus_codegen_detail;\n\n";
+  os << "constexpr size_t kCorvusGenMBusCount = " << mbus_count << ";\n";
+  os << "constexpr size_t kCorvusGenSBusCount = " << sbus_count << ";\n\n";
+
+  os << "class CorvusSimWorkerGenP" << wp.pid << " : public CorvusSimWorker {\n";
+  os << "public:\n";
+  os << "  CorvusSimWorkerGenP" << wp.pid << "(CorvusSimWorkerSynctreeEndpoint* simCoreSynctreeEndpoint,\n";
+  os << "                                     std::vector<CorvusBusEndpoint*> mBusEndpoints,\n";
+  os << "                                     std::vector<CorvusBusEndpoint*> sBusEndpoints);\n";
+  os << "protected:\n";
+  os << "  void createSimModules() override;\n";
+  os << "  void deleteSimModules() override;\n";
+  os << "  void loadRemoteCInputs() override;\n";
+  os << "  void sendRemoteCOutputs() override;\n";
+  os << "  void loadSInputs() override;\n";
+  os << "  void sendRemoteSOutputs() override;\n";
+  os << "  void loadLocalCInputs() override;\n";
+  os << "};\n\n";
+  os << "} // namespace corvus_generated\n";
   os << "#endif // " << guard << "\n";
+  return os.str();
+}
+
+std::string generate_worker_cpp(const std::string& output_base,
+                                const WorkerPlan& wp,
+                                int mbus_count,
+                                int sbus_count,
+                                int top_slot_bits,
+                                const std::map<int, std::vector<const TopSlot*>>& send_to_top,
+                                const std::map<int, std::vector<const RemoteRecvSlot*>>& remote_send_map,
+                                const std::set<std::string>& module_headers) {
+  std::ostringstream os;
+  os << "#include \"" << path_basename(output_base + "_corvus_worker_p" + std::to_string(wp.pid) + ".h") << "\"\n";
+  for (const auto& h : module_headers) {
+    os << "#include \"" << h << "\"\n";
+  }
+  os << "\nnamespace corvus_generated {\n\n";
+  os << "namespace detail = corvus_codegen_detail;\n\n";
+  (void)mbus_count;
+  (void)sbus_count;
+
+  os << "CorvusSimWorkerGenP" << wp.pid << "::CorvusSimWorkerGenP" << wp.pid << "(\n";
+  os << "    CorvusSimWorkerSynctreeEndpoint* simCoreSynctreeEndpoint,\n";
+  os << "    std::vector<CorvusBusEndpoint*> mBusEndpoints,\n";
+  os << "    std::vector<CorvusBusEndpoint*> sBusEndpoints)\n";
+  os << "    : CorvusSimWorker(simCoreSynctreeEndpoint, std::move(mBusEndpoints), std::move(sBusEndpoints)) {\n";
+  os << "  assert(this->mBusEndpoints.size() == kCorvusGenMBusCount && \"MBus endpoint count mismatch\");\n";
+  os << "  assert(this->sBusEndpoints.size() == kCorvusGenSBusCount && \"SBus endpoint count mismatch\");\n";
+  os << "}\n\n";
+
+  os << "void CorvusSimWorkerGenP" << wp.pid << "::createSimModules() {\n";
+  os << "  cModule = new VerilatorModuleHandle<" << wp.comb->class_name << ">(new " << wp.comb->class_name << "());\n";
+  os << "  sModule = new VerilatorModuleHandle<" << wp.seq->class_name << ">(new " << wp.seq->class_name << "());\n";
+  os << "}\n";
+  os << "void CorvusSimWorkerGenP" << wp.pid << "::deleteSimModules() {\n";
+  os << "  auto* cHandle = static_cast<VerilatorModuleHandle<" << wp.comb->class_name << ">* >(cModule);\n";
+  os << "  if (cHandle) { delete cHandle->mp; delete cHandle; }\n";
+  os << "  auto* sHandle = static_cast<VerilatorModuleHandle<" << wp.seq->class_name << ">* >(sModule);\n";
+  os << "  if (sHandle) { delete sHandle->mp; delete sHandle; }\n";
+  os << "  cModule = nullptr; sModule = nullptr;\n";
+  os << "}\n\n";
+
+  // loadRemoteCInputs
+  os << "void CorvusSimWorkerGenP" << wp.pid << "::loadRemoteCInputs() {\n";
+  os << "  auto* combHandle = static_cast<VerilatorModuleHandle<" << wp.comb->class_name << ">* >(cModule);\n";
+  os << "  auto* comb = combHandle ? combHandle->mp : nullptr;\n";
+  os << "  if (!comb) return;\n";
+  if (!wp.downlinks.empty()) {
+    os << "  {\n";
+    os << "    const uint8_t slotBits = " << wp.mbus_slot_bits << ";\n";
+    std::vector<const DownlinkSlot*> direct_slots;
+    std::vector<const DownlinkSlot*> decode_slots;
+    for (const auto& slot : wp.downlinks) {
+      if (slot.chunk.chunk_count == 1 && slot.sig.width_type != PortWidthType::VL_W) {
+        direct_slots.push_back(&slot);
+      } else {
+        decode_slots.push_back(&slot);
+      }
+    }
+    if (!decode_slots.empty()) {
+      os << "    std::vector<detail::SlotDecoder> decoders;\n";
+      os << "    std::unordered_map<uint32_t, size_t> slotIndex;\n";
+      os << "    decoders.reserve(" << decode_slots.size() << ");\n";
+      for (const auto* slot : decode_slots) {
+        os << "    decoders.emplace_back(" << slot->slot_id << ", " << slot->slot_bits << ", "
+           << slot->chunk.data_bits << ", " << slot->chunk.chunk_bits << ", " << slot->chunk.chunk_count << ");\n";
+        os << "    slotIndex[" << slot->slot_id << "] = decoders.size() - 1;\n";
+      }
+    }
+    os << "    for (auto* ep : mBusEndpoints) {\n";
+    os << "      if (!ep) continue;\n";
+    os << "      while (ep->bufferCnt() > 0) {\n";
+    os << "        uint64_t payload = ep->recv();\n";
+    os << "        uint32_t slotId = static_cast<uint32_t>(payload & detail::mask_bits(slotBits));\n";
+    if (!direct_slots.empty()) {
+      os << "        bool handled = false;\n";
+      os << "        switch (slotId) {\n";
+      for (const auto* slot : direct_slots) {
+        os << "        case " << slot->slot_id << ": {\n";
+        os << "          uint64_t data = (payload >> slotBits) & detail::mask_bits(" << slot->sig.width << ");\n";
+        os << "          comb->" << slot->sig.name << " = static_cast<" << cpp_type_from_signal(slot->sig) << ">(data);\n";
+        os << "          handled = true;\n";
+        os << "          break;\n";
+        os << "        }\n";
+      }
+      os << "        default: break;\n";
+      os << "        }\n";
+    }
+    if (!decode_slots.empty()) {
+      if (!direct_slots.empty()) {
+        os << "        if (handled) continue;\n";
+      }
+      os << "        auto it = slotIndex.find(slotId);\n";
+      os << "        if (it == slotIndex.end()) continue;\n";
+      os << "        decoders[it->second].consume(payload);\n";
+    }
+    os << "      }\n";
+    os << "    }\n";
+    if (!decode_slots.empty()) {
+      os << "    for (size_t idx = 0; idx < decoders.size(); ++idx) {\n";
+      os << "      if (!decoders[idx].complete()) continue;\n";
+      os << "      switch (idx) {\n";
+      size_t ri = 0;
+      for (const auto& slot : wp.downlinks) {
+        if (slot.chunk.chunk_count == 1 && slot.sig.width_type != PortWidthType::VL_W) { ++ri; continue; }
+        os << "      case " << ri << ": {\n";
+        if (slot.sig.width_type == PortWidthType::VL_W) {
+          os << "        detail::apply_to_wide(decoders[idx], reinterpret_cast<uint32_t*>(&comb->" << slot.sig.name << "), " << slot.sig.array_size << ");\n";
+        } else {
+          os << "        uint64_t value = detail::assemble_scalar(decoders[idx]);\n";
+          os << "        comb->" << slot.sig.name << " = static_cast<" << cpp_type_from_signal(slot.sig) << ">(value & detail::mask_bits(" << slot.sig.width << "));\n";
+        }
+        os << "        break;\n";
+        os << "      }\n";
+        ++ri;
+      }
+      os << "      default: break;\n";
+      os << "      }\n";
+      os << "    }\n";
+    }
+    os << "  }\n";
+  }
+  os << "}\n\n";
+
+  // sendRemoteCOutputs
+  os << "void CorvusSimWorkerGenP" << wp.pid << "::sendRemoteCOutputs() {\n";
+  os << "  auto* combHandle = static_cast<VerilatorModuleHandle<" << wp.comb->class_name << ">* >(cModule);\n";
+  os << "  auto* comb = combHandle ? combHandle->mp : nullptr;\n";
+  os << "  if (!comb) return;\n";
+  auto top_it = send_to_top.find(wp.pid);
+  if (top_it != send_to_top.end() && !top_it->second.empty()) {
+    os << "  const uint8_t slotBits = " << top_slot_bits << ";\n";
+    for (const auto* slot : top_it->second) {
+      os << "  {\n";
+      os << "    CorvusBusEndpoint* ep = mBusEndpoints[" << slot->bus_index << "];\n";
+      os << "    const uint32_t slotId = " << slot->slot_id << ";\n";
+      os << "    const uint8_t dataBits = " << slot->chunk.data_bits << ";\n";
+      os << "    const uint8_t chunkBits = " << slot->chunk.chunk_bits << ";\n";
+      os << "    const uint32_t chunkCount = " << slot->chunk.chunk_count << ";\n";
+      if (slot->sig.width_type == PortWidthType::VL_W) {
+        os << "    const uint32_t* widePtr = reinterpret_cast<const uint32_t*>(&comb->" << slot->sig.name << ");\n";
+        os << "    for (uint32_t chunkIdx = 0; chunkIdx < chunkCount; ++chunkIdx) {\n";
+        os << "      uint64_t chunkData = detail::read_wide_chunk(widePtr, " << slot->sig.array_size << ", dataBits, chunkIdx);\n";
+        os << "      uint64_t payload = detail::pack_payload(slotId, chunkData, chunkIdx, slotBits, dataBits, chunkBits);\n";
+        os << "      ep->send(0, payload);\n";
+        os << "    }\n";
+      } else {
+        os << "    uint64_t value = static_cast<uint64_t>(comb->" << slot->sig.name << ");\n";
+        os << "    for (uint32_t chunkIdx = 0; chunkIdx < chunkCount; ++chunkIdx) {\n";
+        os << "      uint64_t chunkData = (value >> (chunkIdx * dataBits)) & detail::mask_bits(dataBits);\n";
+        os << "      uint64_t payload = detail::pack_payload(slotId, chunkData, chunkIdx, slotBits, dataBits, chunkBits);\n";
+        os << "      ep->send(0, payload);\n";
+        os << "    }\n";
+      }
+      os << "  }\n";
+    }
+  }
+  os << "}\n\n";
+
+  // loadSInputs (local C->S)
+  os << "void CorvusSimWorkerGenP" << wp.pid << "::loadSInputs() {\n";
+  os << "  auto* combHandle = static_cast<VerilatorModuleHandle<" << wp.comb->class_name << ">* >(cModule);\n";
+  os << "  auto* seqHandle = static_cast<VerilatorModuleHandle<" << wp.seq->class_name << ">* >(sModule);\n";
+  os << "  auto* comb = combHandle ? combHandle->mp : nullptr;\n";
+  os << "  auto* seq = seqHandle ? seqHandle->mp : nullptr;\n";
+  os << "  if (!comb || !seq) return;\n";
+  for (const auto& conn : wp.local_cts) {
+    if (!conn.driver.port || conn.receivers.empty() || !conn.receivers[0].port) continue;
+    std::string src = "comb->" + conn.driver.port->name;
+    std::string dst = "seq->" + conn.receivers[0].port->name;
+    if (conn.width_type == PortWidthType::VL_W) {
+      int words = conn.driver.port ? conn.driver.port->array_size : conn.receivers[0].port->array_size;
+      os << "  for (int i = 0; i < " << words << "; ++i) { " << dst << "[i] = " << src << "[i]; }\n";
+    } else {
+      os << "  " << dst << " = " << src << ";\n";
+    }
+  }
+  os << "}\n\n";
+
+  // sendRemoteSOutputs
+  os << "void CorvusSimWorkerGenP" << wp.pid << "::sendRemoteSOutputs() {\n";
+  os << "  auto* seqHandle = static_cast<VerilatorModuleHandle<" << wp.seq->class_name << ">* >(sModule);\n";
+  os << "  auto* seq = seqHandle ? seqHandle->mp : nullptr;\n";
+  os << "  if (!seq) return;\n";
+  auto remote_it = remote_send_map.find(wp.pid);
+  if (remote_it != remote_send_map.end()) {
+    for (const auto* slot : remote_it->second) {
+      os << "  {\n";
+      os << "    CorvusBusEndpoint* ep = sBusEndpoints[" << slot->bus_index << "];\n";
+      os << "    const uint8_t slotBits = " << slot->slot_bits << ";\n";
+      os << "    const uint32_t slotId = " << slot->slot_id << ";\n";
+      os << "    const uint8_t dataBits = " << slot->chunk.data_bits << ";\n";
+      os << "    const uint8_t chunkBits = " << slot->chunk.chunk_bits << ";\n";
+      os << "    const uint32_t chunkCount = " << slot->chunk.chunk_count << ";\n";
+      os << "    const uint32_t targetId = " << (slot->sig.receiver_pid + 1) << ";\n";
+      if (slot->sig.width_type == PortWidthType::VL_W) {
+        os << "    const uint32_t* widePtr = reinterpret_cast<const uint32_t*>(&seq->" << slot->sig.name << ");\n";
+        os << "    for (uint32_t chunkIdx = 0; chunkIdx < chunkCount; ++chunkIdx) {\n";
+        os << "      uint64_t chunkData = detail::read_wide_chunk(widePtr, " << slot->sig.array_size << ", dataBits, chunkIdx);\n";
+        os << "      uint64_t payload = detail::pack_payload(slotId, chunkData, chunkIdx, slotBits, dataBits, chunkBits);\n";
+        os << "      ep->send(targetId, payload);\n";
+        os << "    }\n";
+      } else {
+        os << "    uint64_t value = static_cast<uint64_t>(seq->" << slot->sig.name << ");\n";
+        os << "    for (uint32_t chunkIdx = 0; chunkIdx < chunkCount; ++chunkIdx) {\n";
+        os << "      uint64_t chunkData = (value >> (chunkIdx * dataBits)) & detail::mask_bits(dataBits);\n";
+        os << "      uint64_t payload = detail::pack_payload(slotId, chunkData, chunkIdx, slotBits, dataBits, chunkBits);\n";
+        os << "      ep->send(targetId, payload);\n";
+        os << "    }\n";
+      }
+      os << "  }\n";
+    }
+  }
+  os << "}\n\n";
+
+  // loadLocalCInputs (S -> C feedback)
+  os << "void CorvusSimWorkerGenP" << wp.pid << "::loadLocalCInputs() {\n";
+  os << "  auto* combHandle = static_cast<VerilatorModuleHandle<" << wp.comb->class_name << ">* >(cModule);\n";
+  os << "  auto* seqHandle = static_cast<VerilatorModuleHandle<" << wp.seq->class_name << ">* >(sModule);\n";
+  os << "  auto* comb = combHandle ? combHandle->mp : nullptr;\n";
+  os << "  auto* seq = seqHandle ? seqHandle->mp : nullptr;\n";
+  os << "  if (!comb || !seq) return;\n";
+  for (const auto& conn : wp.local_stc) {
+    if (!conn.driver.port || conn.receivers.empty() || !conn.receivers[0].port) continue;
+    std::string src = "seq->" + conn.driver.port->name;
+    std::string dst = "comb->" + conn.receivers[0].port->name;
+    if (conn.width_type == PortWidthType::VL_W) {
+      int words = conn.driver.port ? conn.driver.port->array_size : conn.receivers[0].port->array_size;
+      os << "  for (int i = 0; i < " << words << "; ++i) { " << dst << "[i] = " << src << "[i]; }\n";
+    } else {
+      os << "  " << dst << " = " << src << ";\n";
+    }
+  }
+  os << "}\n\n";
+
+  os << "} // namespace corvus_generated\n";
   return os.str();
 }
 
@@ -1016,19 +1007,80 @@ bool CorvusGenerator::generate(const ConnectionAnalysis& analysis,
     ofs.close();
     std::cout << "Corvus generator wrote: " << json_path << std::endl;
 
-    stage = "write_header";
-    // Write generated header
-    std::string header_path = output_base + "_corvus_gen.h";
-    std::ofstream hfs(header_path);
-    if (!hfs.is_open()) {
-      std::cerr << "Failed to open output: " << header_path << std::endl;
-      return false;
+    stage = "write_top_worker";
+    // Top header/cpp
+    std::string top_header_path = output_base + "_corvus_top.h";
+    std::string top_cpp_path = output_base + "_corvus_top.cpp";
+    {
+      std::ofstream th(top_header_path);
+      if (!th.is_open()) {
+        std::cerr << "Failed to open output: " << top_header_path << std::endl;
+        return false;
+      }
+      th << generate_top_header(output_base, external_mod, top_inputs, top_outputs,
+                                mbus_count_clamped, sbus_count_clamped);
     }
-    hfs << generate_header(output_base, external_mod, top_inputs, top_outputs,
-                           workers, top_slots, top_slot_bits, mbus_count_clamped,
-                           sbus_count_clamped, send_to_top, remote_send_map);
-    hfs.close();
-    std::cout << "Corvus generator wrote: " << header_path << std::endl;
+    {
+      std::ofstream tc(top_cpp_path);
+      if (!tc.is_open()) {
+        std::cerr << "Failed to open output: " << top_cpp_path << std::endl;
+        return false;
+      }
+      tc << generate_top_cpp(output_base, external_mod,
+                             workers, top_slots, top_slot_bits, mbus_count_clamped, sbus_count_clamped);
+    }
+
+    // Worker headers/cpps
+    std::vector<std::string> worker_headers;
+    for (const auto& kv : workers) {
+      const auto& wp = kv.second;
+      if (!wp.comb || !wp.seq) continue;
+      std::string w_header_path = output_base + "_corvus_worker_p" + std::to_string(kv.first) + ".h";
+      std::string w_cpp_path = output_base + "_corvus_worker_p" + std::to_string(kv.first) + ".cpp";
+      worker_headers.push_back(w_header_path);
+      std::set<std::string> worker_headers_set;
+      if (wp.comb) worker_headers_set.insert(wp.comb->header_path);
+      if (wp.seq) worker_headers_set.insert(wp.seq->header_path);
+      {
+        std::ofstream wh(w_header_path);
+        if (!wh.is_open()) {
+        std::cerr << "Failed to open output: " << w_header_path << std::endl;
+        return false;
+      }
+      wh << generate_worker_header(output_base, wp, mbus_count_clamped, sbus_count_clamped, worker_headers_set);
+    }
+      {
+        std::ofstream wc(w_cpp_path);
+        if (!wc.is_open()) {
+          std::cerr << "Failed to open output: " << w_cpp_path << std::endl;
+          return false;
+        }
+        wc << generate_worker_cpp(output_base, wp, mbus_count_clamped, sbus_count_clamped, top_slot_bits,
+                                  send_to_top, remote_send_map, worker_headers_set);
+      }
+    }
+
+    stage = "write_aggregate";
+    std::string agg_path = output_base + "_corvus_gen.h";
+    {
+      std::ofstream agg(agg_path);
+      if (!agg.is_open()) {
+        std::cerr << "Failed to open output: " << agg_path << std::endl;
+        return false;
+      }
+      std::string guard = sanitize_guard(output_base + "_AGG");
+      agg << "#ifndef " << guard << "\n";
+      agg << "#define " << guard << "\n\n";
+      agg << "#include \"" << path_basename(output_base + "_corvus_top.h") << "\"\n";
+      for (const auto& wh : worker_headers) {
+        agg << "#include \"" << path_basename(wh) << "\"\n";
+      }
+      agg << "\n#endif // " << guard << "\n";
+    }
+
+    std::cout << "Corvus generator wrote: " << top_header_path << " and " << top_cpp_path << std::endl;
+    std::cout << "Corvus generator wrote " << worker_headers.size() << " worker header/cpp pairs\n";
+    std::cout << "Corvus generator wrote: " << agg_path << std::endl;
     return true;
   } catch (const std::exception& e) {
     std::cerr << "CorvusGenerator::generate failed at stage '" << stage << "': " << e.what() << std::endl;

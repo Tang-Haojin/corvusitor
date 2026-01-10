@@ -137,15 +137,25 @@ int main() {
     return 1;
   }
 
-  std::ifstream hfs(base + "_corvus_gen.h");
-  if (!hfs.is_open()) {
-    std::cerr << "Missing generated header\n";
+  const std::string top_header_path = base + "_corvus_top.h";
+  const std::string worker_header_path = base + "_corvus_worker_p0.h";
+  const std::string agg_header_path = base + "_corvus_gen.h";
+  const std::string top_cpp_path = base + "_corvus_top.cpp";
+  const std::string worker_cpp_path = base + "_corvus_worker_p0.cpp";
+
+  std::ifstream th(top_header_path);
+  std::ifstream wh(worker_header_path);
+  std::ifstream ah(agg_header_path);
+  std::ifstream tc(top_cpp_path);
+  std::ifstream wc(worker_cpp_path);
+  if (!th.is_open() || !wh.is_open() || !ah.is_open() || !tc.is_open() || !wc.is_open()) {
+    std::cerr << "Missing generated top/worker artifacts\n";
     return 1;
   }
-  std::string header_content((std::istreambuf_iterator<char>(hfs)),
-                             std::istreambuf_iterator<char>());
-  if (header_content.find("CorvusTopModuleGen") == std::string::npos ||
-      header_content.find("CorvusSimWorkerGenP0") == std::string::npos) {
+  std::string top_header((std::istreambuf_iterator<char>(th)), std::istreambuf_iterator<char>());
+  std::string worker_header((std::istreambuf_iterator<char>(wh)), std::istreambuf_iterator<char>());
+  if (top_header.find("CorvusTopModuleGen") == std::string::npos ||
+      worker_header.find("CorvusSimWorkerGenP0") == std::string::npos) {
     std::cerr << "Missing expected class definitions\n";
     return 1;
   }

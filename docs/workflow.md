@@ -17,7 +17,10 @@
 ```
 3) 产物  
    - `<output>_corvus.json`：`ConnectionAnalysis` 快照，可作为其他生成/检查输入。  
-   - `<output>_corvus_gen.h`：包含 CorvusTopModuleGen/CorvusSimWorkerGenP* 的实现，可直接编译进上层模拟。
+   - `<output>_corvus_top.{h,cpp}`：TopPorts/CorvusTopModuleGen 定义与实现。  
+   - `<output>_corvus_worker_p<ID>.{h,cpp>`：每个分区一个 worker 定义与实现。  
+   - `<output>_corvus_gen.h`：聚合头，包含所有 top/worker 头。  
+   - 若选择 cmodel 目标：额外生成 `<output>_corvus_cmodel_gen.h`。
 
 ## 运行时数据流（一个周期内）
 - Top → Worker（MBus）：`sendIAndEOutput` 将 I/Eo 按 slot+chunk 编码（round-robin 分配到 mBusEndpoints），`targetId` 为目标分区+1。

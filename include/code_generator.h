@@ -22,6 +22,11 @@
  */
 class CodeGenerator {
 public:
+  enum class GenerationTarget {
+    Corvus,
+    CorvusCModel
+  };
+
   /**
    * Target generator abstraction
    */
@@ -40,7 +45,8 @@ public:
    */
   CodeGenerator(const std::string& modules_dir,
                 int mbus_count = 1,
-                int sbus_count = 1);
+                int sbus_count = 1,
+                GenerationTarget target = GenerationTarget::Corvus);
 
   /**
    * Constructor with explicit simulator type
@@ -50,7 +56,8 @@ public:
   CodeGenerator(const std::string& modules_dir, 
                 SimulatorFactory::SimulatorType simulator_type,
                 int mbus_count = 1,
-                int sbus_count = 1);
+                int sbus_count = 1,
+                GenerationTarget target = GenerationTarget::Corvus);
 
   /**
    * Load module and connection data
@@ -70,6 +77,11 @@ public:
    */
   void print_statistics() const;
 
+  /**
+   * Switch the generation target (corvus or cmodel) and reset the target generator.
+   */
+  void set_target(GenerationTarget target);
+
 private:
   std::string modules_dir_;  // Module directory
   std::map<std::string, ModuleInfo> modules_;  // Module information
@@ -84,6 +96,7 @@ private:
 
   int mbus_count_;
   int sbus_count_;
+  GenerationTarget target_;
   std::unique_ptr<TargetGenerator> target_generator_;
 };
 

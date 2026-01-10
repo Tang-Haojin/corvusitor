@@ -1,12 +1,14 @@
 #include "code_generator.h"
 #include "module_parser.h"
 #include "corvus_generator.h"
+#include "corvus_cmodel_generator.h"
 #include <algorithm>
 #include <iostream>
 
 CodeGenerator::CodeGenerator(const std::string& modules_dir,
                              int mbus_count,
-                             int sbus_count)
+                             int sbus_count,
+                             GenerationTarget target)
   : modules_dir_(modules_dir),
     conn_builder_(nullptr),
     total_connections_(0),
@@ -14,13 +16,17 @@ CodeGenerator::CodeGenerator(const std::string& modules_dir,
     top_outputs_(0),
     mbus_count_(std::max(1, mbus_count)),
     sbus_count_(std::max(1, sbus_count)),
-    target_generator_(new CorvusGenerator()) {}
+    target_(target),
+    target_generator_(nullptr) {
+  set_target(target_);
+}
 
 CodeGenerator::CodeGenerator(const std::string& modules_dir,
                              SimulatorFactory::SimulatorType /* simulator_type */,
                              int mbus_count,
-                             int sbus_count)
-  : CodeGenerator(modules_dir, mbus_count, sbus_count) {}
+                             int sbus_count,
+                             GenerationTarget target)
+  : CodeGenerator(modules_dir, mbus_count, sbus_count, target) {}
 
 bool CodeGenerator::load_data() {
   std::cout << "\n=== Loading Module Data ===" << std::endl;
@@ -115,5 +121,17 @@ void CodeGenerator::print_statistics() const {
   std::cout << "    remoteSitCj: " << remote << std::endl;
   if (!analysis_.warnings.empty()) {
     std::cout << "  Warnings: " << analysis_.warnings.size() << std::endl;
+  }
+}
+
+void CodeGenerator::set_target(GenerationTarget target) {
+  target_ = target;
+  switch (target_) {
+  case GenerationTarget::Corvus:
+    target_generator_ = std::unique_ptr<TargetGenerator>(new CorvusGenerator());
+    break;
+  case GenerationTarget::CorvusCModel:
+    target_generator_ = std::unique_ptr<TargetGenerator>(new CorvusCModelGenerator());
+    break;
   }
 }

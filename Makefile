@@ -17,12 +17,14 @@ SRC_FILES = $(SRC_DIR)/module_parser.cpp \
             $(SRC_DIR)/connection_builder.cpp \
             $(SRC_DIR)/code_generator.cpp \
             $(SRC_DIR)/simulator_interface.cpp \
-            $(SRC_DIR)/corvus_generator.cpp
+            $(SRC_DIR)/corvus_generator.cpp \
+            $(SRC_DIR)/corvus_cmodel_generator.cpp
 OBJ_FILES = $(BUILD_DIR)/module_parser.o \
             $(BUILD_DIR)/connection_builder.o \
             $(BUILD_DIR)/code_generator.o \
             $(BUILD_DIR)/simulator_interface.o \
-            $(BUILD_DIR)/corvus_generator.o
+            $(BUILD_DIR)/corvus_generator.o \
+            $(BUILD_DIR)/corvus_cmodel_generator.o
 
 ## Header files
 HEADERS = $(INCLUDE_DIR)/port_info.h \
@@ -32,6 +34,7 @@ HEADERS = $(INCLUDE_DIR)/port_info.h \
           $(INCLUDE_DIR)/connection_analysis.h \
           $(INCLUDE_DIR)/code_generator.h \
           $(INCLUDE_DIR)/corvus_generator.h \
+          $(INCLUDE_DIR)/corvus_cmodel_generator.h \
           $(INCLUDE_DIR)/simulator_interface.h
 
 ## Test programs
@@ -49,6 +52,8 @@ TEST_CORVUS_SLOTS_BIN = $(BUILD_DIR)/test_corvus_slots
 TEST_CORVUS_SLOTS_SRC = $(TEST_DIR)/test_corvus_slots.cpp
 TEST_CORVUS_YUQUAN_BIN = $(BUILD_DIR)/test_corvus_yuquan
 TEST_CORVUS_YUQUAN_SRC = $(TEST_DIR)/test_corvus_yuquan.cpp
+TEST_CORVUS_YUQUAN_CMODEL_BIN = $(BUILD_DIR)/test_corvus_yuquan_cmodel
+TEST_CORVUS_YUQUAN_CMODEL_SRC = $(TEST_DIR)/test_corvus_yuquan_cmodel.cpp
 YUQUAN_DIR = $(TEST_DIR)/YuQuan
 YUQUAN_SIM_DIR = $(YUQUAN_DIR)/build/sim
 YUQUAN_SENTINEL = $(YUQUAN_SIM_DIR)/verilator-compile-corvus_external/Vcorvus_external.h
@@ -60,7 +65,7 @@ YUQUAN_CORVUS_PATH ?= $(if $(CORVUS_PATH),$(CORVUS_PATH),corvus-compiler)
 CORVUSITOR_BIN = $(BUILD_DIR)/corvusitor
 MAIN_SRC = $(SRC_DIR)/main.cpp
 
-all: $(TEST_PARSER_BIN) $(TEST_CONN_BIN) $(TEST_CODEGEN_BIN) $(TEST_CONN_ANALYSIS_BIN) $(TEST_CORVUS_GEN_BIN) $(TEST_CORVUS_SLOTS_BIN) $(TEST_CORVUS_YUQUAN_BIN) $(CORVUSITOR_BIN)
+all: $(TEST_PARSER_BIN) $(TEST_CONN_BIN) $(TEST_CODEGEN_BIN) $(TEST_CONN_ANALYSIS_BIN) $(TEST_CORVUS_GEN_BIN) $(TEST_CORVUS_SLOTS_BIN) $(TEST_CORVUS_YUQUAN_BIN) $(TEST_CORVUS_YUQUAN_CMODEL_BIN) $(CORVUSITOR_BIN)
 ## Build main program
 $(CORVUSITOR_BIN): $(OBJ_FILES) $(MAIN_SRC) $(HEADERS)
 	$(CXX) $(CXXFLAGS) $(OBJ_FILES) $(MAIN_SRC) -o $@
@@ -88,6 +93,9 @@ $(BUILD_DIR)/simulator_interface.o: $(SRC_DIR)/simulator_interface.cpp $(HEADERS
 $(BUILD_DIR)/corvus_generator.o: $(SRC_DIR)/corvus_generator.cpp $(HEADERS) | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
+$(BUILD_DIR)/corvus_cmodel_generator.o: $(SRC_DIR)/corvus_cmodel_generator.cpp $(HEADERS) | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
 ## Build test programs
 $(TEST_PARSER_BIN): $(OBJ_FILES) $(TEST_PARSER_SRC) $(HEADERS)
 	$(CXX) $(CXXFLAGS) $(OBJ_FILES) $(TEST_PARSER_SRC) -o $@
@@ -111,6 +119,9 @@ $(TEST_CORVUS_SLOTS_BIN): $(OBJ_FILES) $(TEST_CORVUS_SLOTS_SRC) $(HEADERS)
 
 $(TEST_CORVUS_YUQUAN_BIN): $(OBJ_FILES) $(TEST_CORVUS_YUQUAN_SRC) $(HEADERS)
 	$(CXX) $(CXXFLAGS) $(OBJ_FILES) $(TEST_CORVUS_YUQUAN_SRC) -o $@
+
+$(TEST_CORVUS_YUQUAN_CMODEL_BIN): $(OBJ_FILES) $(TEST_CORVUS_YUQUAN_CMODEL_SRC) $(HEADERS)
+	$(CXX) $(CXXFLAGS) $(OBJ_FILES) $(TEST_CORVUS_YUQUAN_CMODEL_SRC) -o $@
 
 ## Run parser test
 .PHONY: test
@@ -144,6 +155,10 @@ test_corvus_slots: $(TEST_CORVUS_SLOTS_BIN)
 .PHONY: test_corvus_yuquan
 test_corvus_yuquan: yuquan_build $(TEST_CORVUS_YUQUAN_BIN)
 	./$(TEST_CORVUS_YUQUAN_BIN) --mbus-count=$(MBUS_COUNT) --sbus-count=$(SBUS_COUNT)
+
+.PHONY: test_corvus_yuquan_cmodel
+test_corvus_yuquan_cmodel: yuquan_build $(TEST_CORVUS_YUQUAN_CMODEL_BIN)
+	./$(TEST_CORVUS_YUQUAN_CMODEL_BIN) --mbus-count=$(MBUS_COUNT) --sbus-count=$(SBUS_COUNT)
 
 # Ensure YuQuan verilator artifacts exist before running the integration test.
 $(YUQUAN_SENTINEL):

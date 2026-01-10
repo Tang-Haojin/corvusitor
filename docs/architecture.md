@@ -6,7 +6,7 @@ Corvusitor 负责从仿真器（verilator/gsim 等）产出的模块中发现拓
 - 模块发现与解析：`ModuleDiscoveryManager` + `ModuleParser` 识别 comb/seq/external 模块并提取端口信息。
 - 连接分析：`ConnectionBuilder::analyze` 将端口分组并分类为 corvus 语义，返回 `ConnectionAnalysis`。
 - 目标生成：`CodeGenerator` 封装上述步骤并接受 `mbus_count`/`sbus_count` 配置，将 `ConnectionAnalysis` 交给目标生成器（当前为 `CorvusGenerator`）。
-- 产出：`CorvusGenerator` 生成 `<output>_corvus.json`（分析快照）和 `<output>_corvus_gen.h`（CorvusTopModuleGen/CorvusSimWorkerGenP* 实现）。
+- 产出：`CorvusGenerator` 生成 `<output>_corvus.json`（分析快照），以及与类名一致的生成文件：`C<output>TopModuleGen.{h,cpp}`/`C<output>SimWorkerGenP*.{h,cpp}`（聚合头 `C<output>CorvusGen.h`），类名前缀携带用户 output。
 
 ## 输入约束（来自仿真输出）
 - 模块类型：`corvus_comb_P*`、`corvus_seq_P*`、可选 `corvus_external`。comb/seq 数量相同（N），external 最多 1 个。
@@ -40,8 +40,8 @@ Corvusitor 负责从仿真器（verilator/gsim 等）产出的模块中发现拓
 - 辅助库：`boilerplate/corvus/corvus_codegen_utils.h` 提供位掩码、payload 打包/解包，以及 VlWide 的跨 word 读写。
 
 ## 生成代码结构
-- `CorvusTopModuleGen`：持有 `TopPortsGen`，负责 I/Eo 发送与 O/Ei 接收，并断言 `kCorvusGenMBusCount`。
-- `CorvusSimWorkerGenP*`：负责 comb/seq 实例化、MBus/SBus 收发、远端 S→C 解码、本地 Ct→Si / St→Ci 直连，并断言 `kCorvusGenMBusCount`/`kCorvusGenSBusCount`。
+- `C<output>TopModuleGen`：持有 `TopPortsGen`，负责 I/Eo 发送与 O/Ei 接收，并断言 `kCorvusGenMBusCount`。
+- `C<output>SimWorkerGenP*`：负责 comb/seq 实例化、MBus/SBus 收发、远端 S→C 解码、本地 Ct→Si / St→Ci 直连，并断言 `kCorvusGenMBusCount`/`kCorvusGenSBusCount`。
 - 生成头文件依赖通用 boilerplate（module_handle/top_ports/corvus_sim_worker 等），可直接纳入上层工程编译。
 
 ## Boilerplate 基线（CModel）

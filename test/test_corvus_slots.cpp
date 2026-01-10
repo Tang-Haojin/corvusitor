@@ -1,4 +1,5 @@
 #include "../include/corvus_generator.h"
+#include <cctype>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
@@ -22,6 +23,35 @@ SignalEndpoint make_endpoint(const ModuleInfo& mod, const PortInfo& port) {
   ep.module = &mod;
   ep.port = &port;
   return ep;
+}
+
+std::string class_prefix(const std::string& output_base) {
+  std::string token = output_base;
+  size_t pos = token.find_last_of("/\\");
+  if (pos != std::string::npos) token = token.substr(pos + 1);
+  for (char& c : token) {
+    if (!std::isalnum(static_cast<unsigned char>(c))) {
+      c = '_';
+    }
+  }
+  if (token.empty()) token = "output";
+  if (std::isdigit(static_cast<unsigned char>(token.front()))) {
+    token.insert(token.begin(), '_');
+  }
+  return "C" + token;
+}
+
+std::string path_dirname(const std::string& path) {
+  size_t pos = path.find_last_of("/\\");
+  if (pos == std::string::npos) return ".";
+  if (pos == 0) return path.substr(0, 1);
+  return path.substr(0, pos);
+}
+
+std::string join_path(const std::string& dir, const std::string& file) {
+  if (dir.empty() || dir == ".") return file;
+  if (dir.back() == '/' || dir.back() == '\\') return dir + file;
+  return dir + "/" + file;
 }
 } // namespace
 
@@ -134,20 +164,29 @@ int main() {
     return 1;
   }
 
-  // Verify header has both worker classes and remote target id for pid1 (targetId=2).
-  std::ifstream hfs(base + "_corvus_gen.h");
-  if (!hfs.is_open()) {
-    std::cerr << "Missing generated header\n";
+  // Verify header/cpp has both worker classes and remote target id for pid1 (targetId=2).
+  const std::string out_dir = path_dirname(base);
+  const std::string prefix = class_prefix(base);
+  std::ifstream agg(join_path(out_dir, prefix + "CorvusGen.h"));
+  std::ifstream worker0_h(join_path(out_dir, prefix + "SimWorkerGenP0.h"));
+  std::ifstream worker1_h(join_path(out_dir, prefix + "SimWorkerGenP1.h"));
+  std::ifstream worker0_cpp(join_path(out_dir, prefix + "SimWorkerGenP0.cpp"));
+  if (!agg.is_open() || !worker0_h.is_open() || !worker1_h.is_open() || !worker0_cpp.is_open()) {
+    std::cerr << "Missing generated top/worker artifacts\n";
     return 1;
   }
-  std::string header_content((std::istreambuf_iterator<char>(hfs)),
+  std::string worker0_header((std::istreambuf_iterator<char>(worker0_h)),
                              std::istreambuf_iterator<char>());
-  if (header_content.find("CorvusSimWorkerGenP0") == std::string::npos ||
-      header_content.find("CorvusSimWorkerGenP1") == std::string::npos) {
+  std::string worker1_header((std::istreambuf_iterator<char>(worker1_h)),
+                             std::istreambuf_iterator<char>());
+  std::string worker0_cpp_content((std::istreambuf_iterator<char>(worker0_cpp)),
+                                  std::istreambuf_iterator<char>());
+  if (worker0_header.find(prefix + "SimWorkerGenP0") == std::string::npos ||
+      worker1_header.find(prefix + "SimWorkerGenP1") == std::string::npos) {
     std::cerr << "Worker class definitions missing\n";
     return 1;
   }
-  if (header_content.find("targetId = 2") == std::string::npos) {
+  if (worker0_cpp_content.find("targetId = 2") == std::string::npos) {
     std::cerr << "Remote target ID not emitted as expected\n";
     return 1;
   }

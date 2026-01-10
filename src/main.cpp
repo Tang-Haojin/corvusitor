@@ -14,12 +14,62 @@
 #include <iostream>
 #include <string>
 
+namespace {
+
+char path_separator() {
+#ifdef _WIN32
+  return '\\';
+#else
+  return '/';
+#endif
+}
+
+std::string join_path(const std::string& dir, const std::string& base) {
+  if (dir.empty() || dir == ".") return base;
+  char sep = path_separator();
+  if (dir.back() == '/' || dir.back() == '\\') {
+    return dir + base;
+  }
+  return dir + sep + base;
+}
+
+std::string sanitize_identifier(const std::string& base) {
+  std::string id;
+  id.reserve(base.size());
+  for (char c : base) {
+    if (std::isalnum(static_cast<unsigned char>(c))) {
+      id.push_back(c);
+    } else {
+      id.push_back('_');
+    }
+  }
+  if (id.empty()) id = "output";
+  if (std::isdigit(static_cast<unsigned char>(id.front()))) {
+    id.insert(id.begin(), '_');
+  }
+  return id;
+}
+
+std::string output_token(const std::string& output_base) {
+  std::string name = output_base;
+  size_t pos = name.find_last_of("/\\");
+  if (pos != std::string::npos) name = name.substr(pos + 1);
+  return sanitize_identifier(name);
+}
+
+std::string class_prefix(const std::string& output_base) {
+  return "C" + output_token(output_base);
+}
+
+} // namespace
+
 int main(int argc, char* argv[]) {
   cxxopts::Options options("Corvusitor", std::string(argv[0]) + ": Generate a wrapper for compiled corvus-compiler output");
   options.add_options()
     ("m,modules-dir", "Path to the modules directory", cxxopts::value<std::string>()->default_value("."))
     ("module-build-dir", "Path to a specific module build directory (overrides modules-dir)", cxxopts::value<std::string>())
-    ("o,output-name", "Output base name (corvus artifacts)", cxxopts::value<std::string>()->default_value("corvus_codegen"))
+    ("output-dir", "Directory for generated artifacts", cxxopts::value<std::string>()->default_value("."))
+    ("o,output-name", "Output name (file prefix for corvus artifacts)", cxxopts::value<std::string>()->default_value("corvus_codegen"))
     ("mbus-count", "Number of MBus endpoints to target (compile-time routing)", cxxopts::value<int>()->default_value("8"))
     ("sbus-count", "Number of SBus endpoints to target (compile-time routing)", cxxopts::value<int>()->default_value("8"))
     ("target", "Generation target: corvus (default) or cmodel", cxxopts::value<std::string>()->default_value("corvus"))
@@ -64,8 +114,13 @@ int main(int argc, char* argv[]) {
   }
 
   // Generate corvus artifacts
-  std::string output_base = result["output-name"].as<std::string>();
-  std::cout << "\nOutput base: " << output_base << "\n";
+  std::string output_dir = result["output-dir"].as<std::string>();
+  std::string output_name = result["output-name"].as<std::string>();
+  std::string output_base = join_path(output_dir, output_name);
+  std::cout << "\nOutput directory: " << output_dir << "\n";
+  std::cout << "Output name: " << output_name << "\n";
+  std::cout << "Output base: " << output_base << "\n";
+  std::string prefix = class_prefix(output_base);
 
   if (!generator.generate_all(output_base)) {
     std::cerr << "\nError: Failed to generate code\n";
@@ -80,11 +135,13 @@ int main(int argc, char* argv[]) {
   std::cout << "====================================================\n";
   std::cout << "\nArtifacts:\n";
   std::cout << "  - " << output_base << "_corvus.json\n";
-  std::cout << "  - " << output_base << "_corvus_gen.h\n";
-  std::cout << "  - " << output_base << "_corvus_top.{h,cpp}\n";
-  std::cout << "  - " << output_base << "_corvus_worker_p*.{h,cpp}\n";
+  std::cout << "  - " << join_path(output_dir, prefix + "CorvusGen.h") << " (includes generated headers)\n";
+  std::cout << "  - " << join_path(output_dir, prefix + "TopModuleGen.h") << " / "
+            << join_path(output_dir, prefix + "TopModuleGen.cpp") << "\n";
+  std::cout << "  - " << join_path(output_dir, prefix + "SimWorkerGenP*.h") << " / "
+            << join_path(output_dir, prefix + "SimWorkerGenP*.cpp") << "\n";
   if (target == CodeGenerator::GenerationTarget::CorvusCModel) {
-    std::cout << "  - " << output_base << "_corvus_cmodel_gen.h\n";
+    std::cout << "  - " << join_path(output_dir, prefix + "CModelGen.h") << "\n";
   }
   std::cout << "\nNext steps:\n";
   std::cout << "  1) Inspect the JSON to feed downstream corvus codegen\n";

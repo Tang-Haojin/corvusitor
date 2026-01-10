@@ -1,5 +1,6 @@
 #include <cstdio>
 #include <cstdlib>
+#include <cctype>
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -52,6 +53,30 @@ int parse_int_arg(const std::vector<std::string>& args,
   }
   return default_val;
 }
+
+std::string class_prefix(const std::string& output_base) {
+  std::string token = output_base;
+  size_t pos = token.find_last_of("/\\");
+  if (pos != std::string::npos) token = token.substr(pos + 1);
+  for (char& c : token) {
+    if (!std::isalnum(static_cast<unsigned char>(c))) {
+      c = '_';
+    }
+  }
+  if (token.empty()) token = "output";
+  if (std::isdigit(static_cast<unsigned char>(token.front()))) {
+    token.insert(token.begin(), '_');
+  }
+  return "C" + token;
+}
+
+std::string join_path(const std::string& dir, const std::string& name) {
+  if (dir.empty() || dir == ".") return name;
+  if (dir.back() == '/' || dir.back() == '\\') {
+    return dir + name;
+  }
+  return dir + "/" + name;
+}
 } // namespace
 
 // Integration test that runs cmodel corvusitor generation against a YuQuan sample build.
@@ -61,20 +86,25 @@ int main(int argc, char* argv[]) {
   const int sbus_count = parse_int_arg(args, {std::string("--sbus-count")}, 8);
   const std::string modules_dir = parse_string_arg(
       args, {std::string("--module-build-dir"), std::string("--modules-dir")}, "test/YuQuan/build/sim");
-  const std::string output_base = parse_string_arg(
-      args, {std::string("--output-base")}, "build/yuquan");
+  const std::string output_dir = parse_string_arg(
+      args, {std::string("--output-dir")}, "build");
+  const std::string output_name = parse_string_arg(
+      args, {std::string("--output-name")}, "yuquan");
+  const std::string output_base = join_path(output_dir, output_name);
   const std::string corvusitor_bin = parse_string_arg(
       args, {std::string("--corvusitor-bin")}, "./build/corvusitor");
 
   // Clean stale artifacts to ensure we validate the new generation.
   std::remove((output_base + "_corvus.json").c_str());
-  std::remove((output_base + "_corvus_gen.h").c_str());
-  std::remove((output_base + "_corvus_cmodel_gen.h").c_str());
+  const std::string prefix = class_prefix(output_base);
+  std::remove(join_path(output_dir, prefix + "CorvusGen.h").c_str());
+  std::remove(join_path(output_dir, prefix + "CModelGen.h").c_str());
 
   std::ostringstream cmd;
   cmd << corvusitor_bin
       << " --module-build-dir " << modules_dir
-      << " --output-name " << output_base
+      << " --output-dir " << output_dir
+      << " --output-name " << output_name
       << " --mbus-count " << mbus_count
       << " --sbus-count " << sbus_count
       << " --target cmodel";
@@ -90,22 +120,22 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
-  std::ifstream header(output_base + "_corvus_gen.h");
+  std::ifstream header(join_path(output_dir, prefix + "CorvusGen.h"));
   if (!header.is_open()) {
     std::cerr << "Missing YuQuan generated header (corvus)\n";
     return 1;
   }
 
-  std::ifstream cmodel_header(output_base + "_corvus_cmodel_gen.h");
+  std::ifstream cmodel_header(join_path(output_dir, prefix + "CModelGen.h"));
   if (!cmodel_header.is_open()) {
     std::cerr << "Missing YuQuan cmodel generated header\n";
     return 1;
   }
   std::string cmodel_content((std::istreambuf_iterator<char>(cmodel_header)),
                              std::istreambuf_iterator<char>());
-  if (cmodel_content.find("CorvusCModelGen") == std::string::npos ||
-      cmodel_content.find("CorvusTopModuleGen") == std::string::npos ||
-      cmodel_content.find("CorvusSimWorkerGenP0") == std::string::npos) {
+  if (cmodel_content.find(prefix + "CModelGen") == std::string::npos ||
+      cmodel_content.find(prefix + "TopModuleGen") == std::string::npos ||
+      cmodel_content.find(prefix + "SimWorkerGenP0") == std::string::npos) {
     std::cerr << "CModel header missing expected symbols\n";
     return 1;
   }

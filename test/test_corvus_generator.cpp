@@ -1,4 +1,5 @@
 #include "../include/corvus_generator.h"
+#include <cctype>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
@@ -15,6 +16,35 @@ PortInfo make_port(const std::string& name, PortDirection dir, PortWidthType typ
   p.lsb = lsb;
   p.array_size = array_size;
   return p;
+}
+
+std::string class_prefix(const std::string& output_base) {
+  std::string token = output_base;
+  size_t pos = token.find_last_of("/\\");
+  if (pos != std::string::npos) token = token.substr(pos + 1);
+  for (char& c : token) {
+    if (!std::isalnum(static_cast<unsigned char>(c))) {
+      c = '_';
+    }
+  }
+  if (token.empty()) token = "output";
+  if (std::isdigit(static_cast<unsigned char>(token.front()))) {
+    token.insert(token.begin(), '_');
+  }
+  return "C" + token;
+}
+
+std::string path_dirname(const std::string& path) {
+  size_t pos = path.find_last_of("/\\");
+  if (pos == std::string::npos) return ".";
+  if (pos == 0) return path.substr(0, 1);
+  return path.substr(0, pos);
+}
+
+std::string join_path(const std::string& dir, const std::string& file) {
+  if (dir.empty() || dir == ".") return file;
+  if (dir.back() == '/' || dir.back() == '\\') return dir + file;
+  return dir + "/" + file;
 }
 } // namespace
 
@@ -137,11 +167,15 @@ int main() {
     return 1;
   }
 
-  const std::string top_header_path = base + "_corvus_top.h";
-  const std::string worker_header_path = base + "_corvus_worker_p0.h";
-  const std::string agg_header_path = base + "_corvus_gen.h";
-  const std::string top_cpp_path = base + "_corvus_top.cpp";
-  const std::string worker_cpp_path = base + "_corvus_worker_p0.cpp";
+  const std::string prefix = class_prefix(base);
+  const std::string expected_top = prefix + "TopModuleGen";
+  const std::string expected_worker = prefix + "SimWorkerGenP0";
+  const std::string out_dir = path_dirname(base);
+  const std::string top_header_path = join_path(out_dir, expected_top + ".h");
+  const std::string worker_header_path = join_path(out_dir, expected_worker + ".h");
+  const std::string agg_header_path = join_path(out_dir, prefix + "CorvusGen.h");
+  const std::string top_cpp_path = join_path(out_dir, expected_top + ".cpp");
+  const std::string worker_cpp_path = join_path(out_dir, expected_worker + ".cpp");
 
   std::ifstream th(top_header_path);
   std::ifstream wh(worker_header_path);
@@ -154,8 +188,8 @@ int main() {
   }
   std::string top_header((std::istreambuf_iterator<char>(th)), std::istreambuf_iterator<char>());
   std::string worker_header((std::istreambuf_iterator<char>(wh)), std::istreambuf_iterator<char>());
-  if (top_header.find("CorvusTopModuleGen") == std::string::npos ||
-      worker_header.find("CorvusSimWorkerGenP0") == std::string::npos) {
+  if (top_header.find(expected_top) == std::string::npos ||
+      worker_header.find(expected_worker) == std::string::npos) {
     std::cerr << "Missing expected class definitions\n";
     return 1;
   }

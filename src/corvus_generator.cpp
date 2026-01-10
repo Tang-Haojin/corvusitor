@@ -229,6 +229,55 @@ std::string path_basename(const std::string& path) {
   return path.substr(pos + 1);
 }
 
+std::string path_dirname(const std::string& path) {
+  size_t pos = path.find_last_of("/\\");
+  if (pos == std::string::npos) return ".";
+  if (pos == 0) return path.substr(0, 1);
+  return path.substr(0, pos);
+}
+
+std::string path_join(const std::string& dir, const std::string& file) {
+  if (dir.empty() || dir == ".") return file;
+  char sep = (dir.find('\\') != std::string::npos) ? '\\' : '/';
+  if (dir.back() == '/' || dir.back() == '\\') {
+    return dir + file;
+  }
+  return dir + sep + file;
+}
+
+std::string sanitize_identifier(const std::string& base) {
+  std::string id;
+  id.reserve(base.size());
+  for (char c : base) {
+    if (std::isalnum(static_cast<unsigned char>(c))) {
+      id.push_back(c);
+    } else {
+      id.push_back('_');
+    }
+  }
+  if (id.empty()) id = "output";
+  if (std::isdigit(static_cast<unsigned char>(id.front()))) {
+    id.insert(id.begin(), '_');
+  }
+  return id;
+}
+
+std::string output_token(const std::string& output_base) {
+  return sanitize_identifier(path_basename(output_base));
+}
+
+std::string top_class_name(const std::string& output_base) {
+  return "C" + output_token(output_base) + "TopModuleGen";
+}
+
+std::string worker_class_name(const std::string& output_base, int pid) {
+  return "C" + output_token(output_base) + "SimWorkerGenP" + std::to_string(pid);
+}
+
+std::string aggregate_header_name(const std::string& output_base) {
+  return "C" + output_token(output_base) + "CorvusGen.h";
+}
+
 std::string cpp_type_from_signal(const SignalRef& sig) {
   if (sig.driver.port) {
     return sig.driver.port->get_cpp_type();
@@ -279,8 +328,9 @@ std::string generate_top_header(const std::string& output_base,
   os << "constexpr size_t kCorvusGenMBusCount = " << mbus_count << ";\n";
   os << "constexpr size_t kCorvusGenSBusCount = " << sbus_count << ";\n\n";
 
+  std::string top_class = top_class_name(output_base);
   std::string ext_class = external_mod ? external_mod->class_name : "";
-  os << "class CorvusTopModuleGen : public CorvusTopModule {\n";
+  os << "class " << top_class << " : public CorvusTopModule {\n";
   os << "public:\n";
   os << "  class TopPortsGen : public TopPorts {\n";
   os << "  public:\n";
@@ -291,7 +341,7 @@ std::string generate_top_header(const std::string& output_base,
     os << "    " << cpp_type_from_signal(kv.second) << " " << kv.first << ";\n";
   }
   os << "  };\n\n";
-  os << "  CorvusTopModuleGen(CorvusTopSynctreeEndpoint* masterSynctreeEndpoint,\n";
+  os << "  " << top_class << "(CorvusTopSynctreeEndpoint* masterSynctreeEndpoint,\n";
   os << "                     std::vector<CorvusBusEndpoint*> mBusEndpoints);\n";
   os << "protected:\n";
   os << "  TopPorts* createTopPorts() override;\n";
@@ -313,13 +363,15 @@ std::string generate_top_cpp(const std::string& output_base,
                              int top_slot_bits,
                              int mbus_count,
                              int sbus_count) {
+  const std::string top_class = top_class_name(output_base);
+  const std::string top_header_name = top_class + ".h";
   std::set<std::string> module_headers;
   if (external_mod) module_headers.insert(external_mod->header_path);
   (void)mbus_count;
   (void)sbus_count;
 
   std::ostringstream os;
-  os << "#include \"" << path_basename(output_base + "_corvus_top.h") << "\"\n";
+  os << "#include \"" << path_basename(top_header_name) << "\"\n";
   for (const auto& h : module_headers) {
     os << "#include \"" << h << "\"\n";
   }
@@ -327,23 +379,23 @@ std::string generate_top_cpp(const std::string& output_base,
   std::string ext_class = external_mod ? external_mod->class_name : "";
   os << "namespace detail = corvus_codegen_detail;\n\n";
 
-  os << "CorvusTopModuleGen::CorvusTopModuleGen(CorvusTopSynctreeEndpoint* masterSynctreeEndpoint,\n";
+  os << top_class << "::" << top_class << "(CorvusTopSynctreeEndpoint* masterSynctreeEndpoint,\n";
   os << "                                     std::vector<CorvusBusEndpoint*> mBusEndpoints)\n";
   os << "    : CorvusTopModule(masterSynctreeEndpoint, std::move(mBusEndpoints)) {\n";
   os << "  assert(this->mBusEndpoints.size() == kCorvusGenMBusCount && \"MBus endpoint count mismatch\");\n";
   os << "}\n\n";
 
-  os << "TopPorts* CorvusTopModuleGen::createTopPorts() { return new TopPortsGen(); }\n";
-  os << "void CorvusTopModuleGen::deleteTopPorts() {\n";
-  os << "  delete static_cast<TopPortsGen*>(topPorts);\n";
+  os << "TopPorts* " << top_class << "::createTopPorts() { return new TopPortsGen(); }\n";
+  os << "void " << top_class << "::deleteTopPorts() {\n";
+  os << "  delete static_cast<" << top_class << "::TopPortsGen*>(topPorts);\n";
   os << "  topPorts = nullptr;\n";
   os << "}\n";
   if (!ext_class.empty()) {
-    os << "ModuleHandle* CorvusTopModuleGen::createExternalModule() {\n";
+    os << "ModuleHandle* " << top_class << "::createExternalModule() {\n";
     os << "  auto* inst = new " << ext_class << "();\n";
     os << "  return new VerilatorModuleHandle<" << ext_class << ">(inst);\n";
     os << "}\n";
-    os << "void CorvusTopModuleGen::deleteExternalModule() {\n";
+    os << "void " << top_class << "::deleteExternalModule() {\n";
     os << "  auto* handle = static_cast<VerilatorModuleHandle<" << ext_class << ">*>(eHandle);\n";
     os << "  if (handle) {\n";
     os << "    delete handle->mp;\n";
@@ -352,13 +404,13 @@ std::string generate_top_cpp(const std::string& output_base,
     os << "  }\n";
     os << "}\n";
   } else {
-    os << "ModuleHandle* CorvusTopModuleGen::createExternalModule() { return nullptr; }\n";
-    os << "void CorvusTopModuleGen::deleteExternalModule() { eHandle = nullptr; }\n";
+    os << "ModuleHandle* " << top_class << "::createExternalModule() { return nullptr; }\n";
+    os << "void " << top_class << "::deleteExternalModule() { eHandle = nullptr; }\n";
   }
 
   // sendIAndEOutput
-  os << "void CorvusTopModuleGen::sendIAndEOutput() {\n";
-  os << "  auto* ports = static_cast<TopPortsGen*>(topPorts);\n";
+  os << "void " << top_class << "::sendIAndEOutput() {\n";
+  os << "  auto* ports = static_cast<" << top_class << "::TopPortsGen*>(topPorts);\n";
   if (!ext_class.empty()) {
     os << "  auto* extHandle = static_cast<VerilatorModuleHandle<" << ext_class << ">*>(eHandle);\n";
     os << "  auto* ext = extHandle ? extHandle->mp : nullptr;\n";
@@ -407,8 +459,8 @@ std::string generate_top_cpp(const std::string& output_base,
   os << "}\n\n";
 
   // loadOAndEInput
-  os << "void CorvusTopModuleGen::loadOAndEInput() {\n";
-  os << "  auto* ports = static_cast<TopPortsGen*>(topPorts);\n";
+  os << "void " << top_class << "::loadOAndEInput() {\n";
+  os << "  auto* ports = static_cast<" << top_class << "::TopPortsGen*>(topPorts);\n";
   if (!ext_class.empty()) {
     os << "  auto* extHandle = static_cast<VerilatorModuleHandle<" << ext_class << ">*>(eHandle);\n";
     os << "  auto* ext = extHandle ? extHandle->mp : nullptr;\n";
@@ -519,9 +571,10 @@ std::string generate_worker_header(const std::string& output_base,
   os << "constexpr size_t kCorvusGenMBusCount = " << mbus_count << ";\n";
   os << "constexpr size_t kCorvusGenSBusCount = " << sbus_count << ";\n\n";
 
-  os << "class CorvusSimWorkerGenP" << wp.pid << " : public CorvusSimWorker {\n";
+  std::string worker_class = worker_class_name(output_base, wp.pid);
+  os << "class " << worker_class << " : public CorvusSimWorker {\n";
   os << "public:\n";
-  os << "  CorvusSimWorkerGenP" << wp.pid << "(CorvusSimWorkerSynctreeEndpoint* simCoreSynctreeEndpoint,\n";
+  os << "  " << worker_class << "(CorvusSimWorkerSynctreeEndpoint* simCoreSynctreeEndpoint,\n";
   os << "                                     std::vector<CorvusBusEndpoint*> mBusEndpoints,\n";
   os << "                                     std::vector<CorvusBusEndpoint*> sBusEndpoints);\n";
   os << "protected:\n";
@@ -547,7 +600,8 @@ std::string generate_worker_cpp(const std::string& output_base,
                                 const std::map<int, std::vector<const RemoteRecvSlot*>>& remote_send_map,
                                 const std::set<std::string>& module_headers) {
   std::ostringstream os;
-  os << "#include \"" << path_basename(output_base + "_corvus_worker_p" + std::to_string(wp.pid) + ".h") << "\"\n";
+  const std::string worker_class = worker_class_name(output_base, wp.pid);
+  os << "#include \"" << path_basename(worker_class + ".h") << "\"\n";
   for (const auto& h : module_headers) {
     os << "#include \"" << h << "\"\n";
   }
@@ -556,7 +610,7 @@ std::string generate_worker_cpp(const std::string& output_base,
   (void)mbus_count;
   (void)sbus_count;
 
-  os << "CorvusSimWorkerGenP" << wp.pid << "::CorvusSimWorkerGenP" << wp.pid << "(\n";
+  os << worker_class << "::" << worker_class << "(\n";
   os << "    CorvusSimWorkerSynctreeEndpoint* simCoreSynctreeEndpoint,\n";
   os << "    std::vector<CorvusBusEndpoint*> mBusEndpoints,\n";
   os << "    std::vector<CorvusBusEndpoint*> sBusEndpoints)\n";
@@ -565,11 +619,11 @@ std::string generate_worker_cpp(const std::string& output_base,
   os << "  assert(this->sBusEndpoints.size() == kCorvusGenSBusCount && \"SBus endpoint count mismatch\");\n";
   os << "}\n\n";
 
-  os << "void CorvusSimWorkerGenP" << wp.pid << "::createSimModules() {\n";
+  os << "void " << worker_class << "::createSimModules() {\n";
   os << "  cModule = new VerilatorModuleHandle<" << wp.comb->class_name << ">(new " << wp.comb->class_name << "());\n";
   os << "  sModule = new VerilatorModuleHandle<" << wp.seq->class_name << ">(new " << wp.seq->class_name << "());\n";
   os << "}\n";
-  os << "void CorvusSimWorkerGenP" << wp.pid << "::deleteSimModules() {\n";
+  os << "void " << worker_class << "::deleteSimModules() {\n";
   os << "  auto* cHandle = static_cast<VerilatorModuleHandle<" << wp.comb->class_name << ">* >(cModule);\n";
   os << "  if (cHandle) { delete cHandle->mp; delete cHandle; }\n";
   os << "  auto* sHandle = static_cast<VerilatorModuleHandle<" << wp.seq->class_name << ">* >(sModule);\n";
@@ -578,7 +632,7 @@ std::string generate_worker_cpp(const std::string& output_base,
   os << "}\n\n";
 
   // loadRemoteCInputs
-  os << "void CorvusSimWorkerGenP" << wp.pid << "::loadRemoteCInputs() {\n";
+  os << "void " << worker_class << "::loadRemoteCInputs() {\n";
   os << "  auto* combHandle = static_cast<VerilatorModuleHandle<" << wp.comb->class_name << ">* >(cModule);\n";
   os << "  auto* comb = combHandle ? combHandle->mp : nullptr;\n";
   os << "  if (!comb) return;\n";
@@ -660,7 +714,7 @@ std::string generate_worker_cpp(const std::string& output_base,
   os << "}\n\n";
 
   // sendRemoteCOutputs
-  os << "void CorvusSimWorkerGenP" << wp.pid << "::sendRemoteCOutputs() {\n";
+  os << "void " << worker_class << "::sendRemoteCOutputs() {\n";
   os << "  auto* combHandle = static_cast<VerilatorModuleHandle<" << wp.comb->class_name << ">* >(cModule);\n";
   os << "  auto* comb = combHandle ? combHandle->mp : nullptr;\n";
   os << "  if (!comb) return;\n";
@@ -695,7 +749,7 @@ std::string generate_worker_cpp(const std::string& output_base,
   os << "}\n\n";
 
   // loadSInputs (local C->S)
-  os << "void CorvusSimWorkerGenP" << wp.pid << "::loadSInputs() {\n";
+  os << "void " << worker_class << "::loadSInputs() {\n";
   os << "  auto* combHandle = static_cast<VerilatorModuleHandle<" << wp.comb->class_name << ">* >(cModule);\n";
   os << "  auto* seqHandle = static_cast<VerilatorModuleHandle<" << wp.seq->class_name << ">* >(sModule);\n";
   os << "  auto* comb = combHandle ? combHandle->mp : nullptr;\n";
@@ -715,7 +769,7 @@ std::string generate_worker_cpp(const std::string& output_base,
   os << "}\n\n";
 
   // sendRemoteSOutputs
-  os << "void CorvusSimWorkerGenP" << wp.pid << "::sendRemoteSOutputs() {\n";
+  os << "void " << worker_class << "::sendRemoteSOutputs() {\n";
   os << "  auto* seqHandle = static_cast<VerilatorModuleHandle<" << wp.seq->class_name << ">* >(sModule);\n";
   os << "  auto* seq = seqHandle ? seqHandle->mp : nullptr;\n";
   os << "  if (!seq) return;\n";
@@ -751,7 +805,7 @@ std::string generate_worker_cpp(const std::string& output_base,
   os << "}\n\n";
 
   // loadLocalCInputs (S -> C feedback)
-  os << "void CorvusSimWorkerGenP" << wp.pid << "::loadLocalCInputs() {\n";
+  os << "void " << worker_class << "::loadLocalCInputs() {\n";
   os << "  auto* combHandle = static_cast<VerilatorModuleHandle<" << wp.comb->class_name << ">* >(cModule);\n";
   os << "  auto* seqHandle = static_cast<VerilatorModuleHandle<" << wp.seq->class_name << ">* >(sModule);\n";
   os << "  auto* comb = combHandle ? combHandle->mp : nullptr;\n";
@@ -1005,17 +1059,21 @@ bool CorvusGenerator::generate(const ConnectionAnalysis& analysis,
     ofs << "]\n";
     ofs << "}\n";
     ofs.close();
-    std::cout << "Corvus generator wrote: " << json_path << std::endl;
+  std::cout << "Corvus generator wrote: " << json_path << std::endl;
 
-    stage = "write_top_worker";
-    // Top header/cpp
-    std::string top_header_path = output_base + "_corvus_top.h";
-    std::string top_cpp_path = output_base + "_corvus_top.cpp";
-    {
-      std::ofstream th(top_header_path);
-      if (!th.is_open()) {
-        std::cerr << "Failed to open output: " << top_header_path << std::endl;
-        return false;
+  stage = "write_top_worker";
+  const std::string output_dir = path_dirname(output_base);
+  const std::string top_class = top_class_name(output_base);
+  const std::string top_header_file = top_class + ".h";
+  const std::string top_cpp_file = top_class + ".cpp";
+  // Top header/cpp
+  std::string top_header_path = path_join(output_dir, top_header_file);
+  std::string top_cpp_path = path_join(output_dir, top_cpp_file);
+  {
+    std::ofstream th(top_header_path);
+    if (!th.is_open()) {
+      std::cerr << "Failed to open output: " << top_header_path << std::endl;
+      return false;
       }
       th << generate_top_header(output_base, external_mod, top_inputs, top_outputs,
                                 mbus_count_clamped, sbus_count_clamped);
@@ -1030,18 +1088,19 @@ bool CorvusGenerator::generate(const ConnectionAnalysis& analysis,
                              workers, top_slots, top_slot_bits, mbus_count_clamped, sbus_count_clamped);
     }
 
-    // Worker headers/cpps
-    std::vector<std::string> worker_headers;
-    for (const auto& kv : workers) {
-      const auto& wp = kv.second;
-      if (!wp.comb || !wp.seq) continue;
-      std::string w_header_path = output_base + "_corvus_worker_p" + std::to_string(kv.first) + ".h";
-      std::string w_cpp_path = output_base + "_corvus_worker_p" + std::to_string(kv.first) + ".cpp";
-      worker_headers.push_back(w_header_path);
-      std::set<std::string> worker_headers_set;
-      if (wp.comb) worker_headers_set.insert(wp.comb->header_path);
-      if (wp.seq) worker_headers_set.insert(wp.seq->header_path);
-      {
+  // Worker headers/cpps
+  std::vector<std::string> worker_headers;
+  for (const auto& kv : workers) {
+    const auto& wp = kv.second;
+    if (!wp.comb || !wp.seq) continue;
+    const std::string worker_class = worker_class_name(output_base, kv.first);
+    std::string w_header_path = path_join(output_dir, worker_class + ".h");
+    std::string w_cpp_path = path_join(output_dir, worker_class + ".cpp");
+    worker_headers.push_back(w_header_path);
+    std::set<std::string> worker_headers_set;
+    if (wp.comb) worker_headers_set.insert(wp.comb->header_path);
+    if (wp.seq) worker_headers_set.insert(wp.seq->header_path);
+    {
         std::ofstream wh(w_header_path);
         if (!wh.is_open()) {
         std::cerr << "Failed to open output: " << w_header_path << std::endl;
@@ -1057,26 +1116,27 @@ bool CorvusGenerator::generate(const ConnectionAnalysis& analysis,
         }
         wc << generate_worker_cpp(output_base, wp, mbus_count_clamped, sbus_count_clamped, top_slot_bits,
                                   send_to_top, remote_send_map, worker_headers_set);
-      }
     }
+  }
 
-    stage = "write_aggregate";
-    std::string agg_path = output_base + "_corvus_gen.h";
-    {
-      std::ofstream agg(agg_path);
-      if (!agg.is_open()) {
-        std::cerr << "Failed to open output: " << agg_path << std::endl;
-        return false;
-      }
-      std::string guard = sanitize_guard(output_base + "_AGG");
-      agg << "#ifndef " << guard << "\n";
-      agg << "#define " << guard << "\n\n";
-      agg << "#include \"" << path_basename(output_base + "_corvus_top.h") << "\"\n";
-      for (const auto& wh : worker_headers) {
-        agg << "#include \"" << path_basename(wh) << "\"\n";
-      }
-      agg << "\n#endif // " << guard << "\n";
+  stage = "write_aggregate";
+  std::string agg_header = aggregate_header_name(output_base);
+  std::string agg_path = path_join(output_dir, agg_header);
+  {
+    std::ofstream agg(agg_path);
+    if (!agg.is_open()) {
+      std::cerr << "Failed to open output: " << agg_path << std::endl;
+      return false;
     }
+    std::string guard = sanitize_guard(output_base + "_AGG");
+    agg << "#ifndef " << guard << "\n";
+    agg << "#define " << guard << "\n\n";
+    agg << "#include \"" << path_basename(top_header_file) << "\"\n";
+    for (const auto& wh : worker_headers) {
+      agg << "#include \"" << path_basename(wh) << "\"\n";
+    }
+    agg << "\n#endif // " << guard << "\n";
+  }
 
     std::cout << "Corvus generator wrote: " << top_header_path << " and " << top_cpp_path << std::endl;
     std::cout << "Corvus generator wrote " << worker_headers.size() << " worker header/cpp pairs\n";

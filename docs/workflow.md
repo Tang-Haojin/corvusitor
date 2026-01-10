@@ -11,16 +11,19 @@
 ```bash
 ./build/corvusitor \
   --module-build-dir <sim_output_dir> \  # 或使用 --modules-dir
+  --output-dir build \
   --output-name corvus_codegen \
   --mbus-count 8 \
   --sbus-count 8
 ```
 3) 产物  
    - `<output>_corvus.json`：`ConnectionAnalysis` 快照，可作为其他生成/检查输入。  
-   - `<output>_corvus_top.{h,cpp}`：TopPorts/CorvusTopModuleGen 定义与实现。  
-   - `<output>_corvus_worker_p<ID>.{h,cpp>`：每个分区一个 worker 定义与实现。  
-   - `<output>_corvus_gen.h`：聚合头，包含所有 top/worker 头。  
-   - 若选择 cmodel 目标：额外生成 `<output>_corvus_cmodel_gen.h`。
+   - `C<output>TopModuleGen.{h,cpp}`：TopPorts/TopModule 实现。  
+   - `C<output>SimWorkerGenP<ID>.{h,cpp>`：每个分区一个 worker 实现。  
+   - `C<output>CorvusGen.h`：聚合头，包含所有 top/worker 头。  
+   - 若选择 cmodel 目标：额外生成 `C<output>CModelGen.h`（CModel 入口）。 
+
+> 说明：`--output-dir` 控制输出目录，`--output-name` 控制输出前缀（决定类名/文件名中的 `<output>` 部分），二者拼成完整路径，不再将目录与名称混用。生成文件名与类名保持一致的驼峰风格，便于跨平台。
 
 ## 运行时数据流（一个周期内）
 - Top → Worker（MBus）：`sendIAndEOutput` 将 I/Eo 按 slot+chunk 编码（round-robin 分配到 mBusEndpoints），`targetId` 为目标分区+1。

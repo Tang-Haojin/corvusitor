@@ -94,7 +94,7 @@ int main() {
   cts.width_type = PortWidthType::VL_8;
   cts.driver = make_endpoint(comb0, comb0.ports[1]);
   cts.receivers.push_back(make_endpoint(seq0, seq0.ports[0]));
-  analysis.partitions[0].local_cts_to_si.push_back(cts);
+  analysis.partitions[0].local_c_to_s.push_back(cts);
 
   // Remote S->C from seq0 to comb1
   ClassifiedConnection remote;
@@ -112,7 +112,7 @@ int main() {
   local_p1.width_type = PortWidthType::VL_8;
   local_p1.driver = make_endpoint(seq1, seq1.ports[1]);
   local_p1.receivers.push_back(make_endpoint(comb1, comb1.ports[0]));
-  analysis.partitions[1].local_stc_to_ci.push_back(local_p1);
+  analysis.partitions[1].local_s_to_c.push_back(local_p1);
 
   CorvusGenerator gen;
   const std::string base = "build/corvus_slot_test";

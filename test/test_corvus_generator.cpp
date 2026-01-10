@@ -106,7 +106,7 @@ int main() {
   local_cts.width_type = PortWidthType::VL_8;
   local_cts.driver = make_endpoint(comb, comb.ports[4]);
   local_cts.receivers.push_back(make_endpoint(seq, seq.ports[0]));
-  analysis.partitions[0].local_cts_to_si.push_back(local_cts);
+  analysis.partitions[0].local_c_to_s.push_back(local_cts);
 
   // Local S->C (sig_back)
   ClassifiedConnection local_stc;
@@ -115,7 +115,7 @@ int main() {
   local_stc.width_type = PortWidthType::VL_8;
   local_stc.driver = make_endpoint(seq, seq.ports[1]);
   local_stc.receivers.push_back(make_endpoint(comb, comb.ports[5]));
-  analysis.partitions[0].local_stc_to_ci.push_back(local_stc);
+  analysis.partitions[0].local_s_to_c.push_back(local_stc);
 
   CorvusGenerator gen;
   const std::string base = "build/corvus_test_output";

@@ -23,8 +23,8 @@ struct ClassifiedConnection {
 
 // Partition-scoped group of classified connections
 struct PartitionConnections {
-  std::vector<ClassifiedConnection> local_cts_to_si;   // comb_i -> seq_i
-  std::vector<ClassifiedConnection> local_stc_to_ci;   // seq_i -> comb_i
+  std::vector<ClassifiedConnection> local_c_to_s;   // comb_i -> seq_i
+  std::vector<ClassifiedConnection> local_s_to_c;   // seq_i -> comb_i
   std::vector<ClassifiedConnection> remote_s_to_c;     // seq_i -> comb_j (i != j)
 };
 

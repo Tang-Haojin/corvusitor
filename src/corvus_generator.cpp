@@ -808,14 +808,14 @@ bool CorvusGenerator::generate(const ConnectionAnalysis& analysis,
     // Collect partition-local signals and register modules
     for (const auto& kv : analysis.partitions) {
       WorkerPlan& wp = get_worker(kv.first);
-      for (const auto& conn : kv.second.local_cts_to_si) {
+      for (const auto& conn : kv.second.local_c_to_s) {
         wp.local_cts.push_back(conn);
         register_module(conn.driver, wp, external_mod);
         if (!conn.receivers.empty()) {
           register_module(conn.receivers[0], wp, external_mod);
         }
       }
-      for (const auto& conn : kv.second.local_stc_to_ci) {
+      for (const auto& conn : kv.second.local_s_to_c) {
         wp.local_stc.push_back(conn);
         register_module(conn.driver, wp, external_mod);
         if (!conn.receivers.empty()) {
@@ -986,10 +986,10 @@ bool CorvusGenerator::generate(const ConnectionAnalysis& analysis,
     size_t idx = 0;
     for (const auto& kv : analysis.partitions) {
       ofs << "\n    \"" << kv.first << "\": {";
-      ofs << "\"local_cts_to_si\": ";
-      write_connections(ofs, kv.second.local_cts_to_si);
-      ofs << ", \"local_stc_to_ci\": ";
-      write_connections(ofs, kv.second.local_stc_to_ci);
+      ofs << "\"local_c_to_s\": ";
+      write_connections(ofs, kv.second.local_c_to_s);
+      ofs << ", \"local_s_to_c\": ";
+      write_connections(ofs, kv.second.local_s_to_c);
       ofs << ", \"remote_s_to_c\": ";
       write_connections(ofs, kv.second.remote_s_to_c);
       ofs << "}";

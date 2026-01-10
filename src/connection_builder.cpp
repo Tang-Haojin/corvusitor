@@ -391,7 +391,7 @@ ConnectionAnalysis ConnectionBuilder::analyze(const std::vector<ModuleInfo>& mod
             warn("Illegal COMB->SEQ across partitions for port '" + conn.port_name + "'");
             continue;
           }
-          analysis.partitions[driver_pid].local_cts_to_si.push_back(single);
+          analysis.partitions[driver_pid].local_c_to_s.push_back(single);
         } else if (recv->type == ModuleType::EXTERNAL) {
           analysis.external_inputs.push_back(single); // comb -> external (Ei)
         } else {
@@ -403,7 +403,7 @@ ConnectionAnalysis ConnectionBuilder::analyze(const std::vector<ModuleInfo>& mod
           continue;
         }
         if (recv->partition_id == driver_pid) {
-          analysis.partitions[driver_pid].local_stc_to_ci.push_back(single);
+          analysis.partitions[driver_pid].local_s_to_c.push_back(single);
         } else {
           analysis.partitions[driver_pid].remote_s_to_c.push_back(single);
         }

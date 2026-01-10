@@ -97,8 +97,8 @@ int main() {
 
   // Partition 0 locals
   const auto& p0 = analysis.partitions[0];
-  failures += !expect(find_by_name(p0.local_cts_to_si, "to_seq"), "localCtSi in P0");
-  failures += !expect(find_by_name(p0.local_stc_to_ci, "from_seq"), "localStCi in P0");
+  failures += !expect(find_by_name(p0.local_c_to_s, "to_seq"), "localCtoS in P0");
+  failures += !expect(find_by_name(p0.local_s_to_c, "from_seq"), "localStoC in P0");
 
   // Partition 0 remote
   const auto* remote = find_by_name(p0.remote_s_to_c, "remote_sig");

@@ -17,7 +17,7 @@ Corvusitor 负责从仿真器（verilator/gsim 等）产出的模块中发现拓
 ## 数据模型（ConnectionAnalysis）
 - 顶层：`top_inputs` / `top_outputs`；缺 driver/receiver 分别视为 I/O。
 - External：`external_inputs`（comb→external，Ei） / `external_outputs`（external→comb，Eo）。
-- 分区：`partitions[pid]`，包含本地 `local_cts_to_si`、`local_stc_to_ci`，以及跨分区 `remote_s_to_c`。
+- 分区：`partitions[pid]`，包含本地 `local_c_to_s`、`local_s_to_c`，以及跨分区 `remote_s_to_c`。
 - 每条连接携带 `port_name`、`width`/`width_type`（对应 `PortWidthType` 枚举）、`driver`、`receivers`（module/port 名及指针）。
 
 ### 分类规则概要
@@ -26,8 +26,8 @@ Corvusitor 负责从仿真器（verilator/gsim 等）产出的模块中发现拓
 3. 按 receiver 拆分分类：
    - 无 driver → `top_inputs`
    - 无 receiver → `top_outputs`
-   - COMB driver：同分区 SEQ → `local_cts_to_si`；EXTERNAL → `external_inputs`；其他类型告警
-   - SEQ driver：COMB 同分区 → `local_stc_to_ci`；COMB 跨分区 → `remote_s_to_c`；其他类型告警
+   - COMB driver：同分区 SEQ → `local_c_to_s`；EXTERNAL → `external_inputs`；其他类型告警
+   - SEQ driver：COMB 同分区 → `local_s_to_c`；COMB 跨分区 → `remote_s_to_c`；其他类型告警
    - EXTERNAL driver：COMB → `external_outputs`；其他类型告警
 
 ## 总线与 slot 模型

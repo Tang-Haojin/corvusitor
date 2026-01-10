@@ -71,8 +71,8 @@ bool CodeGenerator::load_data() {
       analysis_.external_inputs.size() +
       analysis_.external_outputs.size());
   for (const auto& kv : analysis_.partitions) {
-    total_connections_ += static_cast<int>(kv.second.local_cts_to_si.size());
-    total_connections_ += static_cast<int>(kv.second.local_stc_to_ci.size());
+    total_connections_ += static_cast<int>(kv.second.local_c_to_s.size());
+    total_connections_ += static_cast<int>(kv.second.local_s_to_c.size());
     total_connections_ += static_cast<int>(kv.second.remote_s_to_c.size());
   }
 
@@ -112,12 +112,12 @@ void CodeGenerator::print_statistics() const {
   std::cout << "  Partitions: " << analysis_.partitions.size() << std::endl;
   int local_cts = 0, local_stc = 0, remote = 0;
   for (const auto& kv : analysis_.partitions) {
-    local_cts += static_cast<int>(kv.second.local_cts_to_si.size());
-    local_stc += static_cast<int>(kv.second.local_stc_to_ci.size());
+    local_cts += static_cast<int>(kv.second.local_c_to_s.size());
+    local_stc += static_cast<int>(kv.second.local_s_to_c.size());
     remote += static_cast<int>(kv.second.remote_s_to_c.size());
   }
-  std::cout << "    localCtSi: " << local_cts << std::endl;
-  std::cout << "    localStCi: " << local_stc << std::endl;
+  std::cout << "    localCtoS: " << local_cts << std::endl;
+  std::cout << "    localStoC: " << local_stc << std::endl;
   std::cout << "    remoteSitCj: " << remote << std::endl;
   if (!analysis_.warnings.empty()) {
     std::cout << "  Warnings: " << analysis_.warnings.size() << std::endl;

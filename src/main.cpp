@@ -18,6 +18,7 @@ int main(int argc, char* argv[]) {
   cxxopts::Options options("Corvusitor", std::string(argv[0]) + ": Generate a wrapper for compiled corvus-compiler output");
   options.add_options()
     ("m,modules-dir", "Path to the modules directory", cxxopts::value<std::string>()->default_value("."))
+    ("module-build-dir", "Path to a specific module build directory (overrides modules-dir)", cxxopts::value<std::string>())
     ("o,output-name", "Output base name (corvus artifacts)", cxxopts::value<std::string>()->default_value("corvus_codegen"))
     ("mbus-count", "Number of MBus endpoints to target (compile-time routing)", cxxopts::value<int>()->default_value("8"))
     ("sbus-count", "Number of SBus endpoints to target (compile-time routing)", cxxopts::value<int>()->default_value("8"))
@@ -36,6 +37,9 @@ int main(int argc, char* argv[]) {
 
   // Module directory
   std::string modules_dir = result["modules-dir"].as<std::string>();
+  if (result.count("module-build-dir")) {
+    modules_dir = result["module-build-dir"].as<std::string>();
+  }
   std::cout << "\nModule directory: " << modules_dir << "\n";
   int mbus_count = result["mbus-count"].as<int>();
   int sbus_count = result["sbus-count"].as<int>();

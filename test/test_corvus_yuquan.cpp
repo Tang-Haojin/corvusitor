@@ -1,16 +1,52 @@
-#include "../include/code_generator.h"
+#include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <sstream>
 #include <string>
+#include <vector>
 
 namespace {
-int parse_arg(const std::vector<std::string>& args, const std::string& key, int default_val) {
-  for (size_t i = 0; i + 1 < args.size(); ++i) {
-    if (args[i] == key) {
-      try {
-        return std::stoi(args[i + 1]);
-      } catch (...) {
-        return default_val;
+bool matches_key(const std::string& arg, const std::string& key) {
+  return arg == key || arg.find(key + "=") == 0;
+}
+
+std::string parse_string_arg(const std::vector<std::string>& args,
+                             const std::vector<std::string>& keys,
+                             const std::string& default_val) {
+  for (size_t i = 0; i < args.size(); ++i) {
+    for (const auto& key : keys) {
+      if (matches_key(args[i], key)) {
+        const std::string prefix = key + "=";
+        if (args[i].find(prefix) == 0) {
+          return args[i].substr(prefix.size());
+        }
+        if (i + 1 < args.size()) {
+          return args[i + 1];
+        }
+      }
+    }
+  }
+  return default_val;
+}
+
+int parse_int_arg(const std::vector<std::string>& args,
+                  const std::vector<std::string>& keys,
+                  int default_val) {
+  for (size_t i = 0; i < args.size(); ++i) {
+    for (const auto& key : keys) {
+      if (matches_key(args[i], key)) {
+        const std::string prefix = key + "=";
+        try {
+          if (args[i].find(prefix) == 0) {
+            return std::stoi(args[i].substr(prefix.size()));
+          }
+          if (i + 1 < args.size()) {
+            return std::stoi(args[i + 1]);
+          }
+        } catch (...) {
+          return default_val;
+        }
       }
     }
   }
@@ -18,22 +54,31 @@ int parse_arg(const std::vector<std::string>& args, const std::string& key, int 
 }
 } // namespace
 
-// Integration test that runs codegen against the YuQuan verilator outputs.
+// Integration test that runs corvusitor against a YuQuan build as a sample modules directory.
 int main(int argc, char* argv[]) {
   const std::vector<std::string> args(argv + 1, argv + argc);
-  const int mbus_count = parse_arg(args, std::string("--mbus-count"), 8);
-  const int sbus_count = parse_arg(args, std::string("--sbus-count"), 8);
-  const std::string modules_dir = "test/YuQuan/build/sim";
-  const std::string output_base = "build/yuquan_corvus_codegen";
+  const int mbus_count = parse_int_arg(args, {std::string("--mbus-count")}, 8);
+  const int sbus_count = parse_int_arg(args, {std::string("--sbus-count")}, 8);
+  const std::string modules_dir = parse_string_arg(
+      args, {std::string("--module-build-dir"), std::string("--modules-dir")}, "test/YuQuan/build/sim");
+  const std::string output_base = parse_string_arg(
+      args, {std::string("--output-base")}, "build/yuquan_corvus_codegen");
+  const std::string corvusitor_bin = parse_string_arg(
+      args, {std::string("--corvusitor-bin")}, "./build/corvusitor");
 
-  CodeGenerator gen(modules_dir, mbus_count, sbus_count);
-  if (!gen.load_data()) {
-    std::cerr << "Failed to load YuQuan modules\n";
-    return 1;
-  }
+  // Clean stale artifacts to ensure we validate the new generation.
+  std::remove((output_base + "_corvus.json").c_str());
+  std::remove((output_base + "_corvus_gen.h").c_str());
 
-  if (!gen.generate_all(output_base)) {
-    std::cerr << "Failed to generate YuQuan corvus artifacts\n";
+  std::ostringstream cmd;
+  cmd << corvusitor_bin
+      << " --module-build-dir " << modules_dir
+      << " --output-name " << output_base
+      << " --mbus-count " << mbus_count
+      << " --sbus-count " << sbus_count;
+  const int ret = std::system(cmd.str().c_str());
+  if (ret != 0) {
+    std::cerr << "corvusitor generation failed with code " << ret << "\n";
     return 1;
   }
 

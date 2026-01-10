@@ -59,6 +59,9 @@ YUQUAN_SIM_DIR = $(YUQUAN_DIR)/build/sim
 YUQUAN_SENTINEL = $(YUQUAN_SIM_DIR)/verilator-compile-corvus_external/Vcorvus_external.h
 YUQUAN_MAKE = $(MAKE) -C $(YUQUAN_DIR)
 YUQUAN_CORVUS_PATH ?= $(if $(CORVUS_PATH),$(CORVUS_PATH),corvus-compiler)
+MODULE_BUILD_DIR ?= $(YUQUAN_SIM_DIR)
+YUQUAN_OUTPUT_BASE ?= $(BUILD_DIR)/yuquan
+YUQUAN_CMODEL_OUTPUT_BASE ?= $(BUILD_DIR)/yuquan_cmodel
 
 ## Default target
 .PHONY: all
@@ -153,12 +156,20 @@ test_corvus_slots: $(TEST_CORVUS_SLOTS_BIN)
 	./$(TEST_CORVUS_SLOTS_BIN)
 
 .PHONY: test_corvus_yuquan
-test_corvus_yuquan: yuquan_build $(TEST_CORVUS_YUQUAN_BIN)
-	./$(TEST_CORVUS_YUQUAN_BIN) --mbus-count=$(MBUS_COUNT) --sbus-count=$(SBUS_COUNT)
+test_corvus_yuquan: yuquan_build $(TEST_CORVUS_YUQUAN_BIN) $(CORVUSITOR_BIN)
+	./$(TEST_CORVUS_YUQUAN_BIN) \
+	  --mbus-count=$(MBUS_COUNT) --sbus-count=$(SBUS_COUNT) \
+	  --module-build-dir=$(MODULE_BUILD_DIR) \
+	  --output-base=$(YUQUAN_OUTPUT_BASE) \
+	  --corvusitor-bin=./$(CORVUSITOR_BIN)
 
 .PHONY: test_corvus_yuquan_cmodel
-test_corvus_yuquan_cmodel: yuquan_build $(TEST_CORVUS_YUQUAN_CMODEL_BIN)
-	./$(TEST_CORVUS_YUQUAN_CMODEL_BIN) --mbus-count=$(MBUS_COUNT) --sbus-count=$(SBUS_COUNT)
+test_corvus_yuquan_cmodel: yuquan_build $(TEST_CORVUS_YUQUAN_CMODEL_BIN) $(CORVUSITOR_BIN)
+	./$(TEST_CORVUS_YUQUAN_CMODEL_BIN) \
+	  --mbus-count=$(MBUS_COUNT) --sbus-count=$(SBUS_COUNT) \
+	  --module-build-dir=$(MODULE_BUILD_DIR) \
+	  --output-base=$(YUQUAN_CMODEL_OUTPUT_BASE) \
+	  --corvusitor-bin=./$(CORVUSITOR_BIN)
 
 # Ensure YuQuan verilator artifacts exist before running the integration test.
 $(YUQUAN_SENTINEL):

@@ -10,7 +10,7 @@
 2) 运行 corvusitor  
 ```bash
 ./build/corvusitor \
-  --modules-dir <sim_output_dir> \
+  --module-build-dir <sim_output_dir> \  # 或使用 --modules-dir
   --output-name corvus_codegen \
   --mbus-count 8 \
   --sbus-count 8

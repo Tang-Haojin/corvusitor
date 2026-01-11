@@ -1,6 +1,6 @@
 #include "corvus_top_module.h"
 #include <utility>
-
+#include <iostream>
 CorvusTopModule::CorvusTopModule(CorvusTopSynctreeEndpoint* masterSynctreeEndpoint,
                                  std::vector<CorvusBusEndpoint*> mBusEndpoints)
     : synctreeEndpoint(masterSynctreeEndpoint),
@@ -11,14 +11,20 @@ void CorvusTopModule::resetSimWorker() {
     synctreeEndpoint->forceSimCoreReset();
     while(!synctreeEndpoint->isMBusClear() ||
           !synctreeEndpoint->isSBusClear() || !allSimCoreSFinish()) {}
+    std::cout << "All simWorker S Finished" << std::endl;
     clearMBusRecvBuffer();
+    prevSFinishFlag = CorvusSynctreeEndpoint::FlipFlag::PENDING;
 }
 
 void CorvusTopModule::eval() {
+    std::cout << "Top Module: " << debugEvalCnt++ << " eval start" << std::endl;
     sendIAndEOutput();
+    std::cout << "Top Module Send I and E Output" << std::endl;
     while(!synctreeEndpoint->isMBusClear() || !synctreeEndpoint->isSBusClear() || !allSimCoreSFinish()) {}
+    std::cout << "Top Module：All simWorker S Finished" << std::endl;
     raiseMasterSyncFlag();
     while(!synctreeEndpoint->isMBusClear() || !allSimCoreCFinish()) {}
+    std::cout << "Top Module: All simWorker C Finished" << std::endl;
     loadOAndEInput();
 }
 

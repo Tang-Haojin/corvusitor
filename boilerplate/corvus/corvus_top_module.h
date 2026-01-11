@@ -30,6 +30,8 @@ private:
     bool allSimCoreSFinish();
     void raiseMasterSyncFlag();
     void clearMBusRecvBuffer();
+
+    int debugEvalCnt = 0;
 };
 
 #endif

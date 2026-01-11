@@ -1,8 +1,8 @@
 # Corvusitor Makefile
-# C++11 standard for compatibility with Verilator
+# C++17 standard (needed for inline variables in generated headers)
 
 CXX = g++
-CXXFLAGS = -std=c++11 -Wall -Wextra -g -I./include
+CXXFLAGS = -std=c++17 -Wall -Wextra -g -I./include
 MBUS_COUNT ?= 8
 SBUS_COUNT ?= 3
 
@@ -58,11 +58,11 @@ YUQUAN_DIR = $(TEST_DIR)/YuQuan
 YUQUAN_SIM_DIR = $(YUQUAN_DIR)/build/sim
 YUQUAN_SENTINEL = $(YUQUAN_SIM_DIR)/verilator-compile-corvus_external/Vcorvus_external.h
 YUQUAN_MAKE = $(MAKE) -C $(YUQUAN_DIR)
-YUQUAN_CORVUS_PATH ?= $(if $(CORVUS_PATH),$(CORVUS_PATH),corvus-compiler)
+YUQUAN_CORVUS_COMPILER_PATH ?= $(if $(CORVUS_COMPILER_PATH),$(CORVUS_COMPILER_PATH),corvus-compiler)
 MODULE_BUILD_DIR ?= $(YUQUAN_SIM_DIR)
-YUQUAN_OUTPUT_DIR ?= $(BUILD_DIR)
+YUQUAN_OUTPUT_DIR ?= $(YUQUAN_DIR)/build
 YUQUAN_OUTPUT_NAME ?= YuQuan
-YUQUAN_CMODEL_OUTPUT_DIR ?= $(BUILD_DIR)
+YUQUAN_CMODEL_OUTPUT_DIR ?= $(YUQUAN_DIR)/build
 YUQUAN_CMODEL_OUTPUT_NAME ?= YuQuan
 
 ## Default target
@@ -177,7 +177,7 @@ test_corvus_yuquan_cmodel: yuquan_build $(TEST_CORVUS_YUQUAN_CMODEL_BIN) $(CORVU
 
 # Ensure YuQuan verilator artifacts exist before running the integration test.
 $(YUQUAN_SENTINEL):
-	$(YUQUAN_MAKE) CORVUS=1 CORVUS_PATH=$(YUQUAN_CORVUS_PATH) verilate-archive
+	$(YUQUAN_MAKE) CORVUS=1 CORVUS_COMPILER_PATH=$(YUQUAN_CORVUS_COMPILER_PATH) verilate-archive
 
 .PHONY: yuquan_build
 yuquan_build: $(YUQUAN_SENTINEL)

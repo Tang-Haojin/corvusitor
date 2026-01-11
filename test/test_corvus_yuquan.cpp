@@ -83,13 +83,13 @@ std::string join_path(const std::string& dir, const std::string& name) {
 int main(int argc, char* argv[]) {
   const std::vector<std::string> args(argv + 1, argv + argc);
   const int mbus_count = parse_int_arg(args, {std::string("--mbus-count")}, 8);
-  const int sbus_count = parse_int_arg(args, {std::string("--sbus-count")}, 8);
+  const int sbus_count = parse_int_arg(args, {std::string("--sbus-count")}, 3);
   const std::string modules_dir = parse_string_arg(
       args, {std::string("--module-build-dir"), std::string("--modules-dir")}, "test/YuQuan/build/sim");
   const std::string output_dir = parse_string_arg(
-      args, {std::string("--output-dir")}, "build");
+      args, {std::string("--output-dir")}, "test/YuQuan/build");
   const std::string output_name = parse_string_arg(
-      args, {std::string("--output-name")}, "yuquan_corvus_codegen");
+      args, {std::string("--output-name")}, "YuQuan");
   const std::string output_base = join_path(output_dir, output_name);
   const std::string corvusitor_bin = parse_string_arg(
       args, {std::string("--corvusitor-bin")}, "./build/corvusitor");

@@ -77,22 +77,35 @@ std::string join_path(const std::string& dir, const std::string& name) {
   }
   return dir + "/" + name;
 }
+
+bool is_absolute(const std::string& path) {
+  return !path.empty() && (path.front() == '/' || (path.size() > 1 && path[1] == ':'));
+}
+
+std::string resolve_path(const std::string& base, const std::string& path) {
+  if (path.empty() || is_absolute(path)) return path;
+  return join_path(base, path);
+}
 } // namespace
 
 // Integration test that runs cmodel corvusitor generation against a YuQuan sample build.
 int main(int argc, char* argv[]) {
   const std::vector<std::string> args(argv + 1, argv + argc);
   const int mbus_count = parse_int_arg(args, {std::string("--mbus-count")}, 8);
-  const int sbus_count = parse_int_arg(args, {std::string("--sbus-count")}, 8);
-  const std::string modules_dir = parse_string_arg(
-      args, {std::string("--module-build-dir"), std::string("--modules-dir")}, "test/YuQuan/build/sim");
-  const std::string output_dir = parse_string_arg(
-      args, {std::string("--output-dir")}, "build");
+  const int sbus_count = parse_int_arg(args, {std::string("--sbus-count")}, 3);
+  const char* pwd_env = std::getenv("PWD");
+  const std::string repo_root = pwd_env ? pwd_env : ".";
+  const std::string yuquan_dir = resolve_path(
+      repo_root, parse_string_arg(args, {std::string("--yuquan-dir")}, "test/YuQuan"));
+  const std::string modules_dir = resolve_path(
+      repo_root, parse_string_arg(args, {std::string("--module-build-dir"), std::string("--modules-dir")}, "test/YuQuan/build/sim"));
+  const std::string output_dir = resolve_path(
+      repo_root, parse_string_arg(args, {std::string("--output-dir")}, "test/YuQuan/build"));
   const std::string output_name = parse_string_arg(
-      args, {std::string("--output-name")}, "yuquan");
+      args, {std::string("--output-name")}, "YuQuan");
   const std::string output_base = join_path(output_dir, output_name);
-  const std::string corvusitor_bin = parse_string_arg(
-      args, {std::string("--corvusitor-bin")}, "./build/corvusitor");
+  const std::string corvusitor_bin = resolve_path(
+      repo_root, parse_string_arg(args, {std::string("--corvusitor-bin")}, "./build/corvusitor"));
 
   // Clean stale artifacts to ensure we validate the new generation.
   std::remove((output_base + "_corvus.json").c_str());
@@ -101,16 +114,16 @@ int main(int argc, char* argv[]) {
   std::remove(join_path(output_dir, prefix + "CModelGen.h").c_str());
 
   std::ostringstream cmd;
-  cmd << corvusitor_bin
-      << " --module-build-dir " << modules_dir
-      << " --output-dir " << output_dir
-      << " --output-name " << output_name
-      << " --mbus-count " << mbus_count
-      << " --sbus-count " << sbus_count
-      << " --target cmodel";
+  cmd << "make -C " << yuquan_dir << " yuquan_cmodel_gen"
+      << " CORVUSITOR_BIN=" << corvusitor_bin
+      << " CORVUSITOR_MBUS_COUNT=" << mbus_count
+      << " CORVUSITOR_SBUS_COUNT=" << sbus_count
+      << " YUQUAN_SIM_DIR=" << modules_dir
+      << " CORVUSITOR_OUTPUT_DIR=" << output_dir
+      << " CORVUSITOR_CMODEL_OUTPUT_NAME=" << output_name;
   const int ret = std::system(cmd.str().c_str());
   if (ret != 0) {
-    std::cerr << "corvusitor cmodel generation failed with code " << ret << "\n";
+    std::cerr << "yuquan_cmodel_gen failed with code " << ret << "\n";
     return 1;
   }
 

@@ -325,8 +325,12 @@ std::string generate_top_header(const std::string& output_base,
   write_includes(os, module_headers);
   os << "namespace corvus_generated {\n\n";
   os << "namespace detail = corvus_helper;\n\n";
-  os << "constexpr size_t kCorvusGenMBusCount = " << mbus_count << ";\n";
-  os << "constexpr size_t kCorvusGenSBusCount = " << sbus_count << ";\n\n";
+  std::string counts_guard = sanitize_guard(output_base + "_COUNTS");
+  os << "#ifndef " << counts_guard << "\n";
+  os << "#define " << counts_guard << "\n";
+  os << "inline constexpr size_t kCorvusGenMBusCount = " << mbus_count << ";\n";
+  os << "inline constexpr size_t kCorvusGenSBusCount = " << sbus_count << ";\n";
+  os << "#endif\n\n";
 
   std::string top_class = top_class_name(output_base);
   std::string ext_class = external_mod ? external_mod->class_name : "";
@@ -563,13 +567,17 @@ std::string generate_worker_header(const std::string& output_base,
                                    const std::set<std::string>& module_headers) {
   std::ostringstream os;
   std::string guard = sanitize_guard(output_base + "_WORKER_P" + std::to_string(wp.pid));
+  std::string counts_guard = sanitize_guard(output_base + "_COUNTS");
   os << "#ifndef " << guard << "\n";
   os << "#define " << guard << "\n\n";
   write_includes(os, module_headers);
   os << "namespace corvus_generated {\n\n";
   os << "namespace detail = corvus_helper;\n\n";
-  os << "constexpr size_t kCorvusGenMBusCount = " << mbus_count << ";\n";
-  os << "constexpr size_t kCorvusGenSBusCount = " << sbus_count << ";\n\n";
+  os << "#ifndef " << counts_guard << "\n";
+  os << "#define " << counts_guard << "\n";
+  os << "inline constexpr size_t kCorvusGenMBusCount = " << mbus_count << ";\n";
+  os << "inline constexpr size_t kCorvusGenSBusCount = " << sbus_count << ";\n";
+  os << "#endif\n\n";
 
   std::string worker_class = worker_class_name(output_base, wp.pid);
   os << "class " << worker_class << " : public CorvusSimWorker {\n";

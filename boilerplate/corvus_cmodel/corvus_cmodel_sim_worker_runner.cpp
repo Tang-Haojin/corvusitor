@@ -16,6 +16,11 @@ CorvusCModelSimWorkerRunner::~CorvusCModelSimWorkerRunner() {
 void CorvusCModelSimWorkerRunner::run() {
     for (auto worker : simWorkers) {
         threads.emplace_back([worker]() {
+#if defined(__unix__) || defined(__APPLE__)
+            // Allow cancellation even without explicit cancel points in worker loops.
+            pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, nullptr);
+            pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, nullptr);
+#endif
             if (worker) {
                 worker->loop();
             }

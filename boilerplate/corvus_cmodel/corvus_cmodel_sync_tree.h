@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <vector>
 
 #include "corvus_synctree_endpoint.h"
@@ -31,6 +32,7 @@ private:
     std::vector<CorvusSynctreeEndpoint::FlipFlag> simCoreSFinishFlag;
     std::shared_ptr<CorvusCModelMasterSynctreeEndpoint> masterEndpoint;
     std::vector<std::shared_ptr<CorvusCModelSimWorkerSynctreeEndpoint>> simCoreEndpoints;
+    mutable std::mutex mu;
 };
 
 class CorvusCModelMasterSynctreeEndpoint : public CorvusTopSynctreeEndpoint {

@@ -2,31 +2,18 @@
 #include <cstdio>
 #include <iostream>
 #include <thread>
-#include <typeinfo>
 #include <utility>
 
 
 CorvusSimWorker::CorvusSimWorker(CorvusSimWorkerSynctreeEndpoint* simCoreSynctreeEndpoint,
-                                 std::vector<CorvusBusEndpoint*> mBusEndpoints,
-                                 std::vector<CorvusBusEndpoint*> sBusEndpoints)
-    : CorvusSimWorker(simCoreSynctreeEndpoint,
-                      std::move(mBusEndpoints),
-                      std::move(sBusEndpoints),
-                      std::string{}) {}
-
-CorvusSimWorker::CorvusSimWorker(CorvusSimWorkerSynctreeEndpoint* simCoreSynctreeEndpoint,
-                                 std::vector<CorvusBusEndpoint*> mBusEndpoints,
-                                 std::vector<CorvusBusEndpoint*> sBusEndpoints,
-                                 std::string workerName)
-    : synctreeEndpoint(simCoreSynctreeEndpoint),
-      mBusEndpoints(std::move(mBusEndpoints)),
-      sBusEndpoints(std::move(sBusEndpoints)),
-      loopContinue(true) {
-    setGeneratedName(std::move(workerName));
-}
+                                                                 std::vector<CorvusBusEndpoint*> mBusEndpoints,
+                                                                 std::vector<CorvusBusEndpoint*> sBusEndpoints)
+        : synctreeEndpoint(simCoreSynctreeEndpoint),
+            mBusEndpoints(std::move(mBusEndpoints)),
+            sBusEndpoints(std::move(sBusEndpoints)),
+            loopContinue(true) {}
 
 CorvusSimWorker::~CorvusSimWorker() {
-    ensureWorkerName();
     std::cout << "[CorvusSimWorker] Destructor state: "
               << "name=" << (workerName.empty() ? "<unnamed>" : workerName)
               << ", sFinishFlag=" << static_cast<int>(sFinishFlag.getValue())
@@ -43,7 +30,6 @@ CorvusSimWorker::~CorvusSimWorker() {
 }
 
 void CorvusSimWorker::loop() {
-    ensureWorkerName();
     printf("SimWorker(%s) loop started\n", workerName.empty() ? "unnamed" : workerName.c_str());
     while(loopContinue) {
         loopCount++;
@@ -103,18 +89,6 @@ bool CorvusSimWorker::isMasterSyncFlagRaised() {
 
 void CorvusSimWorker::setName(std::string name) {
     workerName = std::move(name);
-}
-
-
-void CorvusSimWorker::setGeneratedName(std::string name) {
-    if (!workerName.empty()) return;
-    if (name.empty()) return;
-    workerName = std::move(name);
-}
-
-void CorvusSimWorker::ensureWorkerName() {
-    if (!workerName.empty()) return;
-    workerName = typeid(*this).name();
 }
 
 void CorvusSimWorker::logStage(std::string stageLabel) {

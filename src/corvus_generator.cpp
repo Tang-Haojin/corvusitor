@@ -623,7 +623,7 @@ std::string generate_worker_cpp(const std::string& output_base,
   os << "    std::vector<CorvusBusEndpoint*> mBusEndpoints,\n";
   os << "    std::vector<CorvusBusEndpoint*> sBusEndpoints)\n";
   os << "    : CorvusSimWorker(simCoreSynctreeEndpoint, std::move(mBusEndpoints), std::move(sBusEndpoints)) {\n";
-  os << "  setGeneratedName(\"" << worker_class << "\");\n";
+  os << "  setName(\"" << worker_class << "\");\n";
   os << "  assert(this->mBusEndpoints.size() == kCorvusGenMBusCount && \"MBus endpoint count mismatch\");\n";
   os << "  assert(this->sBusEndpoints.size() == kCorvusGenSBusCount && \"SBus endpoint count mismatch\");\n";
   os << "}\n\n";

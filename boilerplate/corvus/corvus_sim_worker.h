@@ -12,16 +12,11 @@ class CorvusSimWorker : public SimWorker {
         CorvusSimWorker(CorvusSimWorkerSynctreeEndpoint* simCoreSynctreeEndpoint,
                         std::vector<CorvusBusEndpoint*> mBusEndpoints,
                         std::vector<CorvusBusEndpoint*> sBusEndpoints);
-        CorvusSimWorker(CorvusSimWorkerSynctreeEndpoint* simCoreSynctreeEndpoint,
-                        std::vector<CorvusBusEndpoint*> mBusEndpoints,
-                        std::vector<CorvusBusEndpoint*> sBusEndpoints,
-                        std::string workerName);
         void loop() override;
         void stop();
         const std::string& name() const { return workerName; }
         void setName(std::string name);
     protected:
-        void setGeneratedName(std::string name);
         CorvusSimWorkerSynctreeEndpoint* synctreeEndpoint;
         std::vector<CorvusBusEndpoint*> mBusEndpoints;
         std::vector<CorvusBusEndpoint*> sBusEndpoints;
@@ -38,7 +33,6 @@ class CorvusSimWorker : public SimWorker {
         uint64_t loopCount = 0;
         std::string workerName;
         bool loopContinue;
-        void ensureWorkerName();
         void raiseCFinishFlag();
         void raiseSFinishFlag();
         bool hasStartFlagSeen();

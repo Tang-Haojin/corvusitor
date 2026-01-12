@@ -2,38 +2,24 @@
 #include <utility>
 #include <iostream>
 
-namespace {
-const char* flagToString(CorvusSynctreeEndpoint::FlipFlag flag) {
-    switch (flag) {
-        case CorvusSynctreeEndpoint::FlipFlag::PENDING:
-            return "PENDING";
-        case CorvusSynctreeEndpoint::FlipFlag::A_SIDE:
-            return "A_SIDE";
-        case CorvusSynctreeEndpoint::FlipFlag::B_SIDE:
-            return "B_SIDE";
-    }
-    return "UNKNOWN";
-}
-}  // namespace
+
 CorvusTopModule::CorvusTopModule(CorvusTopSynctreeEndpoint* masterSynctreeEndpoint,
                                  std::vector<CorvusBusEndpoint*> mBusEndpoints)
     : synctreeEndpoint(masterSynctreeEndpoint),
       mBusEndpoints(std::move(mBusEndpoints)) {
-    setStage("constructed");
 }
 
 CorvusTopModule::~CorvusTopModule() {
     std::cout << "[CorvusTopModule] Destructor state: "
-              << "masterSyncFlag=" << flagToString(masterSyncFlag)
-              << ", prevCFinishFlag=" << flagToString(prevCFinishFlag)
-              << ", prevSFinishFlag=" << flagToString(prevSFinishFlag)
+              << "masterSyncFlag=" << masterSyncFlag.getValue()
+              << ", prevSFinishFlag=" << masterSyncFlag.getValue()
               << ", lastStage=" << lastStage
+              << ", evalCount=" << evalCount
               << std::endl;
 
     if (synctreeEndpoint) {
         std::cout << "[CorvusTopModule] Synctree flags at teardown: "
-                  << "simCoreCFinish=" << flagToString(synctreeEndpoint->getSimCoreCFinishFlag())
-                  << ", simCoreSFinish=" << flagToString(synctreeEndpoint->getSimCoreSFinishFlag())
+                  << ", simCoreSFinish=" << synctreeEndpoint->getSimCoreSFinishFlag().getValue()
                   << ", mBusClear=" << (synctreeEndpoint->isMBusClear() ? "true" : "false")
                   << ", sBusClear=" << (synctreeEndpoint->isSBusClear() ? "true" : "false")
                   << std::endl;
@@ -43,79 +29,51 @@ CorvusTopModule::~CorvusTopModule() {
 }
 
 void CorvusTopModule::resetSimWorker() {
-    setStage("reset_sim_worker_start");
-    synctreeEndpoint->forceSimCoreReset();
-    setStage("reset_wait_s_finish");
-    while(!synctreeEndpoint->isMBusClear() ||
-          !synctreeEndpoint->isSBusClear() || !allSimCoreSFinish() || !allSimCoreCFinish()) {}
-    setStage("reset_s_finish_done");
-    std::cout << "All simWorker S Finished" << std::endl;
-    clearMBusRecvBuffer();
-    setStage("reset_clear_mbus_buffer");
-    prevSFinishFlag = CorvusSynctreeEndpoint::FlipFlag::PENDING;
-    prevCFinishFlag = CorvusSynctreeEndpoint::FlipFlag::A_SIDE;
 }
 
 void CorvusTopModule::eval() {
-    const uint64_t iter = evalCount++;
-    setStage("eval_start");
-    logStage("eval_start", iter);
+    evalCount++;
+    logStage("eval_start");
     sendIAndEOutput();
-    setStage("after_send_I_E_output");
-    logStage("after_send_I_E_output", iter);
-    setStage("wait_s_finish");
-    while(!synctreeEndpoint->isMBusClear() || !synctreeEndpoint->isSBusClear() || !allSimCoreSFinish()) {}
-    setStage("s_finish_done");
-    logStage("s_finish_done", iter);
+    while(!synctreeEndpoint->isMBusClear() || !synctreeEndpoint->isSBusClear()) {}
     raiseMasterSyncFlag();
-    setStage("after_raise_master_sync");
-    logStage("after_raise_master_sync", iter);
-    setStage("wait_c_finish");
-    while(!synctreeEndpoint->isMBusClear() || !allSimCoreCFinish()) {}
-    setStage("c_finish_done");
-    logStage("c_finish_done", iter);
+    logStage(std::string("master sync flag raised to ") + std::to_string(masterSyncFlag.getValue()));
+    logStage("waiting for S finish");
+    while(!synctreeEndpoint->isMBusClear() || !allSimCoreSFinish()) {}
+    logStage("S finish detected");
     loadOAndEInput();
-    setStage("after_load_O_E_input");
-    logStage("after_load_O_E_input", iter);
-
+    logStage("eval_done");
 }
 
 void CorvusTopModule::evalE() {
-    setStage("evalE_start");
     eHandle->eval();
-    setStage("evalE_done");
 }
 
 bool CorvusTopModule::allSimCoreCFinish() {
-    if(synctreeEndpoint->getSimCoreCFinishFlag() == CorvusSynctreeEndpoint::FlipFlag::PENDING) {
-        return false;
-    }
-    if(prevCFinishFlag == synctreeEndpoint->getSimCoreCFinishFlag()) {
-        return false;
-    } else {
-        prevCFinishFlag = synctreeEndpoint->getSimCoreCFinishFlag();
-        return true;
-    }
+    return false;
 }
 
 bool CorvusTopModule::allSimCoreSFinish() {
-    if(synctreeEndpoint->getSimCoreSFinishFlag() == CorvusSynctreeEndpoint::FlipFlag::PENDING) {
+    if(synctreeEndpoint->getSimCoreSFinishFlag().getValue() == prevSFinishFlag.getValue()) {
         return false;
-    }
-    if(prevSFinishFlag == synctreeEndpoint->getSimCoreSFinishFlag()) {
+    } else if (synctreeEndpoint->getSimCoreSFinishFlag().getValue() == 0) {
+        // pending state
         return false;
-    } else {
-        prevSFinishFlag = synctreeEndpoint->getSimCoreSFinishFlag();
+    } else if (synctreeEndpoint->getSimCoreSFinishFlag().getValue() == prevSFinishFlag.nextValue()) {
+        prevSFinishFlag.updateToNext();
         return true;
+    } else {
+        // 丢步，严重错误
+        std::cerr << "[CorvusTopModule] Fatal error: SimCore S finish flag jumped from "
+                  << static_cast<int>(prevSFinishFlag.getValue()) << " to "
+                  << static_cast<int>(synctreeEndpoint->getSimCoreSFinishFlag().getValue())
+                  << std::endl;
+        exit(1);
     }
 }
 
 void CorvusTopModule::raiseMasterSyncFlag() {
-    if(masterSyncFlag == CorvusSynctreeEndpoint::FlipFlag::PENDING || masterSyncFlag == CorvusSynctreeEndpoint::FlipFlag::B_SIDE) {
-        masterSyncFlag = CorvusSynctreeEndpoint::FlipFlag::A_SIDE;
-    } else {
-        masterSyncFlag = CorvusSynctreeEndpoint::FlipFlag::B_SIDE;
-    }
+    masterSyncFlag.updateToNext();
     synctreeEndpoint->setMasterSyncFlag(masterSyncFlag);
 }
 
@@ -127,14 +85,10 @@ void CorvusTopModule::clearMBusRecvBuffer() {
     }
 }
 
-void CorvusTopModule::setStage(const char* stage) {
-    if (!stage) return;
-    lastStage = stage;
-}
 
-void CorvusTopModule::logStage(const char* stageLabel, uint64_t iter) {
-    if (!stageLabel) return;
-    printf("TopModule iter=%llu stage=%s\n",
-           static_cast<unsigned long long>(iter),
-           stageLabel);
+void CorvusTopModule::logStage(std::string stageLabel) {
+    lastStage = stageLabel;
+    printf("TopModule evalCount=%llu stage=%s\n",
+           static_cast<unsigned long long>(evalCount),
+           stageLabel.c_str());
 }

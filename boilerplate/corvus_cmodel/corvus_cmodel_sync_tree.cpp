@@ -4,14 +4,14 @@
 #include <stdexcept>
 
 namespace {
-CorvusSynctreeEndpoint::FlipFlag aggregateFlag(const std::vector<CorvusSynctreeEndpoint::FlipFlag>& flags) {
+CorvusSynctreeEndpoint::ValueFlag aggregateFlag(const std::vector<CorvusSynctreeEndpoint::ValueFlag>& flags) {
     if (flags.empty()) {
-        return CorvusSynctreeEndpoint::FlipFlag::PENDING;
+        return CorvusSynctreeEndpoint::ValueFlag();
     }
-    CorvusSynctreeEndpoint::FlipFlag first = flags.front();
+    CorvusSynctreeEndpoint::ValueFlag first = flags.front();
     for (const auto& flag : flags) {
-        if (flag != first) {
-            return CorvusSynctreeEndpoint::FlipFlag::PENDING;
+        if (flag.getValue() != first.getValue()) {
+            return CorvusSynctreeEndpoint::ValueFlag();
         }
     }
     return first;
@@ -19,9 +19,8 @@ CorvusSynctreeEndpoint::FlipFlag aggregateFlag(const std::vector<CorvusSynctreeE
 } // namespace
 
 CorvusCModelSyncTree::CorvusCModelSyncTree(uint32_t nSimCore)
-    : masterSyncFlag(CorvusSynctreeEndpoint::FlipFlag::PENDING),
-      simCoreCFinishFlag(nSimCore, CorvusSynctreeEndpoint::FlipFlag::PENDING),
-      simCoreSFinishFlag(nSimCore, CorvusSynctreeEndpoint::FlipFlag::PENDING),
+    : masterSyncFlag(CorvusSynctreeEndpoint::ValueFlag()),
+      simCoreSFinishFlag(nSimCore, CorvusSynctreeEndpoint::ValueFlag()),
       masterEndpoint(nullptr) {
     masterEndpoint = std::make_shared<CorvusCModelMasterSynctreeEndpoint>(this);
     simCoreEndpoints.reserve(nSimCore);
@@ -68,41 +67,26 @@ bool CorvusCModelMasterSynctreeEndpoint::isSBusClear() {
     return true;
 }
 
-CorvusSynctreeEndpoint::FlipFlag CorvusCModelMasterSynctreeEndpoint::getSimCoreCFinishFlag() {
-    std::lock_guard<std::mutex> lock(tree->mu);
-    return aggregateFlag(tree->simCoreCFinishFlag);
-}
 
-CorvusSynctreeEndpoint::FlipFlag CorvusCModelMasterSynctreeEndpoint::getSimCoreSFinishFlag() {
-    std::lock_guard<std::mutex> lock(tree->mu);
+CorvusSynctreeEndpoint::ValueFlag CorvusCModelMasterSynctreeEndpoint::getSimCoreSFinishFlag() {
     return aggregateFlag(tree->simCoreSFinishFlag);
 }
 
-void CorvusCModelMasterSynctreeEndpoint::setMasterSyncFlag(CorvusSynctreeEndpoint::FlipFlag flag) {
-    std::lock_guard<std::mutex> lock(tree->mu);
+void CorvusCModelMasterSynctreeEndpoint::setMasterSyncFlag(CorvusSynctreeEndpoint::ValueFlag flag) {
     tree->masterSyncFlag = flag;
 }
 
 CorvusCModelSimWorkerSynctreeEndpoint::CorvusCModelSimWorkerSynctreeEndpoint(CorvusCModelSyncTree* tree, uint32_t idx)
     : tree(tree), index(idx) {}
 
-void CorvusCModelSimWorkerSynctreeEndpoint::setCFinishFlag(CorvusSynctreeEndpoint::FlipFlag flag) {
-    if (index >= tree->simCoreCFinishFlag.size()) {
-        throw std::out_of_range("Invalid sim core index for C flag");
-    }
-    std::lock_guard<std::mutex> lock(tree->mu);
-    tree->simCoreCFinishFlag[index] = flag;
-}
 
-void CorvusCModelSimWorkerSynctreeEndpoint::setSFinishFlag(CorvusSynctreeEndpoint::FlipFlag flag) {
+void CorvusCModelSimWorkerSynctreeEndpoint::setSFinishFlag(CorvusSynctreeEndpoint::ValueFlag flag) {
     if (index >= tree->simCoreSFinishFlag.size()) {
         throw std::out_of_range("Invalid sim core index for S flag");
     }
-    std::lock_guard<std::mutex> lock(tree->mu);
     tree->simCoreSFinishFlag[index] = flag;
 }
 
-CorvusSynctreeEndpoint::FlipFlag CorvusCModelSimWorkerSynctreeEndpoint::getMasterSyncFlag() {
-    std::lock_guard<std::mutex> lock(tree->mu);
+CorvusSynctreeEndpoint::ValueFlag CorvusCModelSimWorkerSynctreeEndpoint::getMasterSyncFlag() {
     return tree->masterSyncFlag;
 }

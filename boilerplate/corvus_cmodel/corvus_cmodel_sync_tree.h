@@ -27,9 +27,9 @@ public:
 private:
     friend class CorvusCModelMasterSynctreeEndpoint;
     friend class CorvusCModelSimWorkerSynctreeEndpoint;
-    CorvusSynctreeEndpoint::FlipFlag masterSyncFlag;
-    std::vector<CorvusSynctreeEndpoint::FlipFlag> simCoreCFinishFlag;
-    std::vector<CorvusSynctreeEndpoint::FlipFlag> simCoreSFinishFlag;
+    CorvusSynctreeEndpoint::ValueFlag masterSyncFlag;
+    std::vector<CorvusSynctreeEndpoint::ValueFlag> simCoreCFinishFlag;
+    std::vector<CorvusSynctreeEndpoint::ValueFlag> simCoreSFinishFlag;
     std::shared_ptr<CorvusCModelMasterSynctreeEndpoint> masterEndpoint;
     std::vector<std::shared_ptr<CorvusCModelSimWorkerSynctreeEndpoint>> simCoreEndpoints;
     mutable std::mutex mu;
@@ -43,9 +43,8 @@ public:
     void forceSimCoreReset() override;
     bool isMBusClear() override;
     bool isSBusClear() override;
-    FlipFlag getSimCoreCFinishFlag() override;
-    FlipFlag getSimCoreSFinishFlag() override;
-    void setMasterSyncFlag(FlipFlag flag) override;
+    ValueFlag getSimCoreSFinishFlag() override;
+    void setMasterSyncFlag(ValueFlag flag) override;
 
 private:
     CorvusCModelSyncTree* tree;
@@ -56,9 +55,8 @@ public:
     CorvusCModelSimWorkerSynctreeEndpoint(CorvusCModelSyncTree* tree, uint32_t idx);
     ~CorvusCModelSimWorkerSynctreeEndpoint() override = default;
 
-    void setCFinishFlag(FlipFlag flag) override;
-    void setSFinishFlag(FlipFlag flag) override;
-    FlipFlag getMasterSyncFlag() override;
+    void setSFinishFlag(ValueFlag flag) override;
+    ValueFlag getMasterSyncFlag() override;
 
 private:
     CorvusCModelSyncTree* tree;

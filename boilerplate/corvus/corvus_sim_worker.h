@@ -30,18 +30,17 @@ class CorvusSimWorker : public SimWorker {
         virtual void sendRemoteSOutputs() = 0;
         virtual void loadLocalCInputs() = 0;
     private:
-        CorvusSynctreeEndpoint::FlipFlag cFinishFlag = CorvusSynctreeEndpoint::FlipFlag::PENDING;
-        CorvusSynctreeEndpoint::FlipFlag sFinishFlag = CorvusSynctreeEndpoint::FlipFlag::PENDING;
-        CorvusSynctreeEndpoint::FlipFlag prevMasterSyncFlag = CorvusSynctreeEndpoint::FlipFlag::PENDING;
-        const char* lastStage = "init";
+        CorvusSynctreeEndpoint::ValueFlag cFinishFlag;
+        CorvusSynctreeEndpoint::ValueFlag sFinishFlag;
+        CorvusSynctreeEndpoint::ValueFlag prevMasterSyncFlag;
+        std::string lastStage = "init";
         uint64_t loopCount = 0;
         std::string workerName;
         void ensureWorkerName();
         void raiseCFinishFlag();
         void raiseSFinishFlag();
         bool isMasterSyncFlagRaised();
-        void setStage(const char* stage);
-        void logStage(const char* stageLabel, uint64_t iter);
+        void logStage(std::string stageLabel);
 };
 
 #endif

@@ -90,9 +90,9 @@ void CorvusSimWorker::setName(std::string name) {
 }
 
 void CorvusSimWorker::logStage(std::string stageLabel) {
-    lastStage = stageLabel;
-    printf("SimWorker(%s) loopCount=%llu stage=%s\n",
-           workerName.empty() ? "unnamed" : workerName.c_str(),
-           static_cast<unsigned long long>(loopCount),
-           stageLabel.c_str());
+    // lastStage = stageLabel;
+    // printf("SimWorker(%s) loopCount=%llu stage=%s\n",
+    //        workerName.empty() ? "unnamed" : workerName.c_str(),
+    //        static_cast<unsigned long long>(loopCount),
+    //        stageLabel.c_str());
 }

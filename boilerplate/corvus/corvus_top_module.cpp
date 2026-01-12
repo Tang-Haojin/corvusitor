@@ -85,8 +85,8 @@ void CorvusTopModule::clearMBusRecvBuffer() {
 
 
 void CorvusTopModule::logStage(std::string stageLabel) {
-    lastStage = stageLabel;
-    printf("TopModule evalCount=%llu stage=%s\n",
-           static_cast<unsigned long long>(evalCount),
-           stageLabel.c_str());
+    // lastStage = stageLabel;
+    // printf("TopModule evalCount=%llu stage=%s\n",
+    //        static_cast<unsigned long long>(evalCount),
+    //        stageLabel.c_str());
 }

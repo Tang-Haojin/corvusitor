@@ -5,10 +5,10 @@
 #include <utility>
 
 
-CorvusSimWorker::CorvusSimWorker(CorvusSimWorkerSynctreeEndpoint* simCoreSynctreeEndpoint,
+CorvusSimWorker::CorvusSimWorker(CorvusSimWorkerSynctreeEndpoint* simWorkerSynctreeEndpoint,
                                                                  std::vector<CorvusBusEndpoint*> mBusEndpoints,
                                                                  std::vector<CorvusBusEndpoint*> sBusEndpoints)
-        : synctreeEndpoint(simCoreSynctreeEndpoint),
+    : synctreeEndpoint(simWorkerSynctreeEndpoint),
             mBusEndpoints(std::move(mBusEndpoints)),
             sBusEndpoints(std::move(sBusEndpoints)),
             loopContinue(true) {}
@@ -17,12 +17,12 @@ CorvusSimWorker::~CorvusSimWorker() {
     std::cout << "[CorvusSimWorker] Destructor state: "
               << "name=" << (workerName.empty() ? "<unnamed>" : workerName)
               << ", sFinishFlag=" << static_cast<int>(sFinishFlag.getValue())
-              << ", prevMasterSyncFlag=" << static_cast<int>(prevMasterSyncFlag.getValue())
+              << ", prevTopSyncFlag=" << static_cast<int>(prevTopSyncFlag.getValue())
               << ", lastStage=" << lastStage 
               << ", loopCount=" << loopCount;
     if (synctreeEndpoint) {
-        std::cout << ", masterSyncFlag(now)="
-                  << static_cast<int>(synctreeEndpoint->getMasterSyncFlag().getValue());
+        std::cout << ", topSyncFlag(now)="
+                  << static_cast<int>(synctreeEndpoint->getTopSyncFlag().getValue());
     } else {
         std::cout << ", synctreeEndpoint=null";
     }
@@ -33,13 +33,13 @@ void CorvusSimWorker::loop() {
     printf("SimWorker(%s) loop started\n", workerName.empty() ? "unnamed" : workerName.c_str());
     while(loopContinue) {
         loopCount++;
-        logStage("waiting for master sync");
-        while(loopContinue && !isMasterSyncFlagRaised()) {
+        logStage("waiting for top sync");
+        while(loopContinue && !isTopSyncFlagRaised()) {
             // yield to allow stop requests to be observed promptly
             std::this_thread::yield();
         }
         if (!loopContinue) break;
-        logStage(std::string("get master sync flag as ") + std::to_string(prevMasterSyncFlag.getValue()));
+        logStage(std::string("get top sync flag as ") + std::to_string(prevTopSyncFlag.getValue()));
         loadRemoteCInputs();
         cModule->eval();
         sendRemoteCOutputs();
@@ -62,22 +62,22 @@ void CorvusSimWorker::raiseSFinishFlag() {
 }
 
 bool CorvusSimWorker::hasStartFlagSeen() {
-    return synctreeEndpoint->getSimWokerStartFlag().getValue() == CorvusSynctreeEndpoint::ValueFlag::START_GUARD;
+    return synctreeEndpoint->getSimWorkerStartFlag().getValue() == CorvusSynctreeEndpoint::ValueFlag::START_GUARD;
 }
 
-bool CorvusSimWorker::isMasterSyncFlagRaised() {
-    if(synctreeEndpoint->getMasterSyncFlag().getValue() == prevMasterSyncFlag.getValue()) {
+bool CorvusSimWorker::isTopSyncFlagRaised() {
+    if(synctreeEndpoint->getTopSyncFlag().getValue() == prevTopSyncFlag.getValue()) {
         return false;
-    } else if (synctreeEndpoint->getMasterSyncFlag().getValue() == prevMasterSyncFlag.nextValue()) {
-        prevMasterSyncFlag.updateToNext();
+    } else if (synctreeEndpoint->getTopSyncFlag().getValue() == prevTopSyncFlag.nextValue()) {
+        prevTopSyncFlag.updateToNext();
         return true;
     } else {
         // Unexpected flag value, possibly due to reset
         // 严重错误，终止模拟
-        std::cerr << "[CorvusSimWorker] Fatal error: unexpected master sync flag value="
-                  << static_cast<int>(synctreeEndpoint->getMasterSyncFlag().getValue())
-                  << " (expected " << static_cast<int>(prevMasterSyncFlag.getValue())
-                  << " or " << static_cast<int>(prevMasterSyncFlag.nextValue()) << ")"
+        std::cerr << "[CorvusSimWorker] Fatal error: unexpected top sync flag value="
+                  << static_cast<int>(synctreeEndpoint->getTopSyncFlag().getValue())
+                  << " (expected " << static_cast<int>(prevTopSyncFlag.getValue())
+                  << " or " << static_cast<int>(prevTopSyncFlag.nextValue()) << ")"
                   << " in SimWorker(" << (workerName.empty() ? "unnamed" : workerName) << ")"
                   << std::endl;
         stop();

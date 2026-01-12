@@ -10,7 +10,7 @@
 
 class CorvusTopModule : public TopModule {
 public:
-    CorvusTopModule(CorvusTopSynctreeEndpoint* masterSynctreeEndpoint,
+    CorvusTopModule(CorvusTopSynctreeEndpoint* topSynctreeEndpoint,
                     std::vector<CorvusBusEndpoint*> mBusEndpoints);
     ~CorvusTopModule() override;
     void prepareSimWorker() override;
@@ -25,12 +25,12 @@ protected:
 
 private:
     CorvusSynctreeEndpoint::ValueFlag prevSFinishFlag;
-    CorvusSynctreeEndpoint::ValueFlag masterSyncFlag;
+    CorvusSynctreeEndpoint::ValueFlag topSyncFlag;
     std::string lastStage = "init";
     uint64_t evalCount = 0;
 
-    bool allSimCoreSFinish();
-    void raiseMasterSyncFlag();
+    bool allSimWorkerSFinish();
+    void raiseTopSyncFlag();
     void clearMBusRecvBuffer();
     void logStage(std::string stageLabel);
 };

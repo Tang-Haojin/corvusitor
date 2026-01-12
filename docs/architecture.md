@@ -46,37 +46,37 @@
 
 ## Boilerplate 基线（CModel）
 - 总线（`boilerplate/corvus_cmodel/corvus_cmodel_idealized_bus.{h,cpp}`）：`CorvusCModelIdealizedBus` 管理 `vector<std::shared_ptr<CorvusCModelIdealizedBusEndpoint>>`；Endpoint 内部 `deque<uint64_t>` 作为收发缓冲，`send` 在 bus 协助下写入目标端点（写路径加锁，读不加锁），`recv` 空时返回 0，支持 `bufferCnt` / `clearBuffer` 查询与清理。Bus 构造时固定端点数，提供 `getEndpointCount`/`getEndpoint(s)`。
- - 同步树（`boilerplate/corvus_cmodel/corvus_cmodel_sync_tree.{h,cpp}`）：`CorvusCModelSyncTree` 生成 master + N worker 端点（shared_ptr 管理），维护 `masterSyncFlag`、`simCoreSFinishFlag[]`。Master 端点的 `isMBusClear`/`isSBusClear` 恒为 true；`getSimCoreSFinishFlag` 仅在全一致时返回，否则 PENDING。Worker 端点可设 S finish flag，能读取 masterSyncFlag。
+ - 同步树（`boilerplate/corvus_cmodel/corvus_cmodel_sync_tree.{h,cpp}`）：`CorvusCModelSyncTree` 生成 TopModule + N SimWorker 端点（shared_ptr 管理），维护 `topSyncFlag`、`simWorkerSFinishFlag[]`。Top 端点的 `isMBusClear`/`isSBusClear` 恒为 true；`getSimWorkerSFinishFlag` 仅在全一致时返回，否则 PENDING。SimWorker 端点可设 S finish flag，能读取 `topSyncFlag`。
 - SimWorker 骨架（`boilerplate/corvus/corvus_sim_worker.{h,cpp}`）：构造传入 synctree 端点与 m/sBus 端点指针；虚方法需由生成器实现：`createSimModules`/`deleteSimModules`、`loadRemoteCInputs`、`sendRemoteCOutputs`、`loadSInputs`、`sendRemoteSOutputs`、`loadLocalCInputs`，并通过 `init`/`cleanup` 触发生命期管理。
 - Top 模块骨架（`boilerplate/corvus/corvus_top_module.{h,cpp}`）：构造传入 top synctree 端点与 mBus 端点指针；生成器需实现 `createExternalModule`/`deleteExternalModule`、`sendIAndEOutput`、`loadOAndEInput`、`resetSimWorker`，`clearMBusRecvBuffer` 已默认清空接收缓存。
 - Worker 线程运行器（`boilerplate/corvus_cmodel/corvus_cmodel_sim_worker_runner.{h,cpp}`）：`CorvusCModelSimWorkerRunner` 接收 `vector<std::shared_ptr<CorvusSimWorker>>`，`run` 为每个 worker 启动线程执行 `loop`，`stop` 停止并回收线程。
 
 ## 同步机制（当前实现）
 - 顶层/Worker 角色与端点
-   - 顶层 `TopModule`：持有 [boilerplate/corvus/corvus_top_module.h](boilerplate/corvus/corvus_top_module.h) / [boilerplate/corvus/corvus_top_module.cpp](boilerplate/corvus/corvus_top_module.cpp)。通过 `CorvusTopSynctreeEndpoint` 管理 master 同步与全局完成标志；通过 `mBusEndpoints` 与各分区通信。
-   - Worker `SimWorker`：持有 [boilerplate/corvus/corvus_sim_worker.h](boilerplate/corvus/corvus_sim_worker.h) / [boilerplate/corvus/corvus_sim_worker.cpp](boilerplate/corvus/corvus_sim_worker.cpp)。通过 `CorvusSimWorkerSynctreeEndpoint` 观察 master 同步与上报 S 阶段完成；持有 `mBusEndpoints`/`sBusEndpoints`。
+   - 顶层 `TopModule`：持有 [boilerplate/corvus/corvus_top_module.h](boilerplate/corvus/corvus_top_module.h) / [boilerplate/corvus/corvus_top_module.cpp](boilerplate/corvus/corvus_top_module.cpp)。通过 `CorvusTopSynctreeEndpoint` 管理 Top 同步与全局完成标志；通过 `mBusEndpoints` 与各分区通信。
+   - Worker `SimWorker`：持有 [boilerplate/corvus/corvus_sim_worker.h](boilerplate/corvus/corvus_sim_worker.h) / [boilerplate/corvus/corvus_sim_worker.cpp](boilerplate/corvus/corvus_sim_worker.cpp)。通过 `CorvusSimWorkerSynctreeEndpoint` 观察 Top 同步与上报 S 阶段完成；持有 `mBusEndpoints`/`sBusEndpoints`。
    - 同步树接口：见 [boilerplate/corvus/corvus_synctree_endpoint.h](boilerplate/corvus/corvus_synctree_endpoint.h)。`ValueFlag` 为 8-bit 环形计数（保留 0 作为 PENDING，`nextValue()` 永不返回 0）。
 
 - 顶层周期（`TopModule::eval()`）
    - 发送 Top 输入与 External 输出：`sendIAndEOutput()`。
    - 等待总线清空：同时等待 `isMBusClear()` 和 `isSBusClear()` 为真（确保上一轮所有帧已被消费）。
-   - 提升 master 同步标志：`masterSyncFlag.updateToNext()` 后写入 `setMasterSyncFlag(masterSyncFlag)`。
-   - 等待 Worker 报告 S 阶段完成：先等待 MBus 清空，再等待 `getSimCoreSFinishFlag()` 从 `prevSFinishFlag.nextValue()` 达到一致；成功后将 `prevSFinishFlag.updateToNext()`。
+   - 提升 Top 同步标志：`topSyncFlag.updateToNext()` 后写入 `setTopSyncFlag(topSyncFlag)`。
+   - 等待 Worker 报告 S 阶段完成：先等待 MBus 清空，再等待 `getSimWorkerSFinishFlag()` 从 `prevSFinishFlag.nextValue()` 达到一致；成功后将 `prevSFinishFlag.updateToNext()`。
    - 接收 Top 输出与 External 输入：`loadOAndEInput()`。
    - 额外：`prepareSimWorker()` 在启动前设置 `setSimWorkerStartFlag(START_GUARD)`；`evalE()` 驱动 external 的 `eHandle->eval()`。
 
 - Worker 周期（`SimWorker::loop()`）
-   - 等待 master 同步变化：轮询 `getMasterSyncFlag()`，当等于本地 `prevMasterSyncFlag.nextValue()` 时，更新 `prevMasterSyncFlag.updateToNext()` 并进入本轮。
+   - 等待 Top 同步变化：轮询 `getTopSyncFlag()`，当等于本地 `prevTopSyncFlag.nextValue()` 时，更新 `prevTopSyncFlag.updateToNext()` 并进入本轮。
    - C 阶段：`loadRemoteCInputs()` → `cModule->eval()` → `sendRemoteCOutputs()`。
    - S 阶段：`loadSInputs()` → `sModule->eval()` → `sendRemoteSOutputs()`。
    - 上报完成：`raiseSFinishFlag()` 将本地 `sFinishFlag.updateToNext()` 并调用 `setSFinishFlag(sFinishFlag)`；随后执行 `loadLocalCInputs()` 做本地 St→Ci 的直连拷贝。
    - 停止：`stop()` 置位 `loopContinue=false`，循环在下一次检查时退出。
 
 - 一致性与错误处理
-   - 顶层对 S 完成的判断遵循“全 worker 一致”的语义，`getSimCoreSFinishFlag()` 未达成一致时返回 `0`（PENDING）。
-   - Worker 在 `isMasterSyncFlagRaised()` 中若看到非期望值（既不是当前 `prevMasterSyncFlag`，也不是 `nextValue()`）将视为严重错误并调用 `stop()`。
-   - 顶层在 `allSimCoreSFinish()` 中若发现跳变（从当前直接跳到非 `nextValue()`）会输出致命错误并 `exit(1)`。
+   - 顶层对 S 完成的判断遵循“全 worker 一致”的语义，`getSimWorkerSFinishFlag()` 未达成一致时返回 `0`（PENDING）。
+   - Worker 在 `isTopSyncFlagRaised()` 中若看到非期望值（既不是当前 `prevTopSyncFlag`，也不是 `nextValue()`）将视为严重错误并调用 `stop()`。
+   - 顶层在 `allSimWorkerSFinish()` 中若发现跳变（从当前直接跳到非 `nextValue()`）会输出致命错误并 `exit(1)`。
 
 - 总线缓冲约束
-   - 顶层在提升 master 同步前后都会等待总线清空，避免跨轮残留。
+   - 顶层在提升 Top 同步前后都会等待总线清空，避免跨轮残留。
    - Worker 端按阶段耗尽缓冲：输入阶段拉取所有待处理帧，输出阶段尽快发送；结束后不主动清空接收缓冲（由接收者负责）。

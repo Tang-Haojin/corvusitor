@@ -345,7 +345,7 @@ std::string generate_top_header(const std::string& output_base,
     os << "    " << cpp_type_from_signal(kv.second) << " " << kv.first << ";\n";
   }
   os << "  };\n\n";
-  os << "  " << top_class << "(CorvusTopSynctreeEndpoint* masterSynctreeEndpoint,\n";
+  os << "  " << top_class << "(CorvusTopSynctreeEndpoint* topSynctreeEndpoint,\n";
   os << "                     std::vector<CorvusBusEndpoint*> mBusEndpoints);\n";
   os << "protected:\n";
   os << "  TopPorts* createTopPorts() override;\n";
@@ -383,9 +383,9 @@ std::string generate_top_cpp(const std::string& output_base,
   std::string ext_class = external_mod ? external_mod->class_name : "";
   os << "namespace detail = corvus_helper;\n\n";
 
-  os << top_class << "::" << top_class << "(CorvusTopSynctreeEndpoint* masterSynctreeEndpoint,\n";
+  os << top_class << "::" << top_class << "(CorvusTopSynctreeEndpoint* topSynctreeEndpoint,\n";
   os << "                                     std::vector<CorvusBusEndpoint*> mBusEndpoints)\n";
-  os << "    : CorvusTopModule(masterSynctreeEndpoint, std::move(mBusEndpoints)) {\n";
+  os << "    : CorvusTopModule(topSynctreeEndpoint, std::move(mBusEndpoints)) {\n";
   os << "  assert(this->mBusEndpoints.size() == kCorvusGenMBusCount && \"MBus endpoint count mismatch\");\n";
   os << "}\n\n";
 
@@ -582,7 +582,7 @@ std::string generate_worker_header(const std::string& output_base,
   std::string worker_class = worker_class_name(output_base, wp.pid);
   os << "class " << worker_class << " : public CorvusSimWorker {\n";
   os << "public:\n";
-  os << "  " << worker_class << "(CorvusSimWorkerSynctreeEndpoint* simCoreSynctreeEndpoint,\n";
+  os << "  " << worker_class << "(CorvusSimWorkerSynctreeEndpoint* simWorkerSynctreeEndpoint,\n";
   os << "                                     std::vector<CorvusBusEndpoint*> mBusEndpoints,\n";
   os << "                                     std::vector<CorvusBusEndpoint*> sBusEndpoints);\n";
   os << "protected:\n";
@@ -619,10 +619,10 @@ std::string generate_worker_cpp(const std::string& output_base,
   (void)sbus_count;
 
   os << worker_class << "::" << worker_class << "(\n";
-  os << "    CorvusSimWorkerSynctreeEndpoint* simCoreSynctreeEndpoint,\n";
+  os << "    CorvusSimWorkerSynctreeEndpoint* simWorkerSynctreeEndpoint,\n";
   os << "    std::vector<CorvusBusEndpoint*> mBusEndpoints,\n";
   os << "    std::vector<CorvusBusEndpoint*> sBusEndpoints)\n";
-  os << "    : CorvusSimWorker(simCoreSynctreeEndpoint, std::move(mBusEndpoints), std::move(sBusEndpoints)) {\n";
+  os << "    : CorvusSimWorker(simWorkerSynctreeEndpoint, std::move(mBusEndpoints), std::move(sBusEndpoints)) {\n";
   os << "  setName(\"" << worker_class << "\");\n";
   os << "  assert(this->mBusEndpoints.size() == kCorvusGenMBusCount && \"MBus endpoint count mismatch\");\n";
   os << "  assert(this->sBusEndpoints.size() == kCorvusGenSBusCount && \"SBus endpoint count mismatch\");\n";

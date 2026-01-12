@@ -9,7 +9,7 @@
 class CorvusSimWorker : public SimWorker {
     public:
         ~CorvusSimWorker() override;
-        CorvusSimWorker(CorvusSimWorkerSynctreeEndpoint* simCoreSynctreeEndpoint,
+        CorvusSimWorker(CorvusSimWorkerSynctreeEndpoint* simWorkerSynctreeEndpoint,
                         std::vector<CorvusBusEndpoint*> mBusEndpoints,
                         std::vector<CorvusBusEndpoint*> sBusEndpoints);
         void loop() override;
@@ -27,14 +27,14 @@ class CorvusSimWorker : public SimWorker {
         virtual void loadLocalCInputs() = 0;
     private:
         CorvusSynctreeEndpoint::ValueFlag sFinishFlag;
-        CorvusSynctreeEndpoint::ValueFlag prevMasterSyncFlag;
+        CorvusSynctreeEndpoint::ValueFlag prevTopSyncFlag;
         std::string lastStage = "init";
         uint64_t loopCount = 0;
         std::string workerName;
         bool loopContinue;
         void raiseSFinishFlag();
         bool hasStartFlagSeen();
-        bool isMasterSyncFlagRaised();
+        bool isTopSyncFlagRaised();
         void logStage(std::string stageLabel);
 };
 

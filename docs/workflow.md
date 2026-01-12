@@ -37,23 +37,23 @@
 - 顶层 Top 周期（参考 [boilerplate/corvus/corvus_top_module.cpp](boilerplate/corvus/corvus_top_module.cpp)）
    1. `sendIAndEOutput()` 下发本轮输入与 external 输出。
    2. 等待 `isMBusClear()` 与 `isSBusClear()` 均为真（上轮残留耗尽）。
-   3. `raiseMasterSyncFlag()`：`masterSyncFlag.updateToNext()`，调用 `setMasterSyncFlag(masterSyncFlag)`。
-   4. 等待 MBus 清空与所有 Worker S 完成一致：`getSimCoreSFinishFlag()` == `prevSFinishFlag.nextValue()`，成功后 `prevSFinishFlag.updateToNext()`。
+   3. `raiseTopSyncFlag()`：`topSyncFlag.updateToNext()`，调用 `setTopSyncFlag(topSyncFlag)`。
+   4. 等待 MBus 清空与所有 Worker S 完成一致：`getSimWorkerSFinishFlag()` == `prevSFinishFlag.nextValue()`，成功后 `prevSFinishFlag.updateToNext()`。
    5. `loadOAndEInput()` 接收本轮输出与 external 输入。
 
 - Worker 周期（参考 [boilerplate/corvus/corvus_sim_worker.cpp](boilerplate/corvus/corvus_sim_worker.cpp)）
-   1. 轮询 `getMasterSyncFlag()`，当等于 `prevMasterSyncFlag.nextValue()` 时进入本轮并 `prevMasterSyncFlag.updateToNext()`。
+   1. 轮询 `getTopSyncFlag()`，当等于 `prevTopSyncFlag.nextValue()` 时进入本轮并 `prevTopSyncFlag.updateToNext()`。
    2. C 阶段：`loadRemoteCInputs()` → `cModule->eval()` → `sendRemoteCOutputs()`。
    3. S 阶段：`loadSInputs()` → `sModule->eval()` → `sendRemoteSOutputs()`。
    4. 完成上报：`raiseSFinishFlag()`，将本地 `sFinishFlag` 提升并 `setSFinishFlag(sFinishFlag)`；随后 `loadLocalCInputs()` 执行本地 St→Ci 拷贝。
-   5. 循环尾：记录阶段日志，进入下一轮等待 master 同步变化。
+   5. 循环尾：记录阶段日志，进入下一轮等待 Top 同步变化。
 
 - 辅助/初始化
-   - 顶层在启动前调用 `prepareSimWorker()`：`setSimWorkerStartFlag(ValueFlag::START_GUARD)` 作为 Worker 启动哨兵；Worker 提供 `hasStartFlagSeen()` 用于检测，但当前主循环以 master 同步为驱动。
+   - 顶层在启动前调用 `prepareSimWorker()`：`setSimWorkerStartFlag(ValueFlag::START_GUARD)` 作为 Worker 启动哨兵；Worker 提供 `hasStartFlagSeen()` 用于检测，但当前主循环以 Top 同步为驱动。
    - `ValueFlag` 环形计数语义：保留 `0` 为 PENDING，驱动时使用 `nextValue()`，详见 [boilerplate/corvus/corvus_synctree_endpoint.h](boilerplate/corvus/corvus_synctree_endpoint.h)。
 
 - 错误与一致性
-   - Worker 若观测到 `getMasterSyncFlag()` 出现非期望跳变（既非当前也非 `nextValue()`）将输出致命错误并 `stop()`；顶层若观测到 S 完成标志跳变异常将 `exit(1)`。
+   - Worker 若观测到 `getTopSyncFlag()` 出现非期望跳变（既非当前也非 `nextValue()`）将输出致命错误并 `stop()`；顶层若观测到 S 完成标志跳变异常将 `exit(1)`。
    - 顶层对 S 完成的判定为“全体一致”语义，未达一致返回 `0`（PENDING），因此等待可能跨越多个 Worker 的异步完成窗口。
 
 ## 编解码与 slot 规划细节（供调试）

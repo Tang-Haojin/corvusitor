@@ -36,11 +36,11 @@ class CorvusSynctreeEndpoint{
 class CorvusTopSynctreeEndpoint : public CorvusSynctreeEndpoint {
 public:
   virtual ~CorvusTopSynctreeEndpoint() = default;
-  virtual void forceSimCoreReset();
+    virtual void forceSimWorkerReset();
   virtual bool isMBusClear() = 0;
   virtual bool isSBusClear() = 0;
-  virtual ValueFlag getSimCoreSFinishFlag() = 0;
-  virtual void setMasterSyncFlag(ValueFlag flag) = 0;
+    virtual ValueFlag getSimWorkerSFinishFlag() = 0;
+    virtual void setTopSyncFlag(ValueFlag flag) = 0;
   virtual void setSimWorkerStartFlag(ValueFlag flag) = 0;
 };
 
@@ -48,7 +48,7 @@ class CorvusSimWorkerSynctreeEndpoint : public CorvusSynctreeEndpoint {
 public:
     virtual ~CorvusSimWorkerSynctreeEndpoint() = default;
     virtual void setSFinishFlag(ValueFlag flag) = 0;
-    virtual ValueFlag getMasterSyncFlag() = 0;
-    virtual ValueFlag getSimWokerStartFlag() = 0;
+    virtual ValueFlag getTopSyncFlag() = 0;
+    virtual ValueFlag getSimWorkerStartFlag() = 0;
 };
 #endif

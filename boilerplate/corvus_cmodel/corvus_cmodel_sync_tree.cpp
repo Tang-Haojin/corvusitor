@@ -18,65 +18,65 @@ CorvusSynctreeEndpoint::ValueFlag aggregateFlag(const std::vector<CorvusSynctree
 }
 } // namespace
 
-CorvusCModelSyncTree::CorvusCModelSyncTree(uint32_t nSimCore)
-    : masterSyncFlag(CorvusSynctreeEndpoint::ValueFlag()),
-      simCoreSFinishFlag(nSimCore, CorvusSynctreeEndpoint::ValueFlag()),
-      masterEndpoint(nullptr) {
-    masterEndpoint = std::make_shared<CorvusCModelMasterSynctreeEndpoint>(this);
-    simCoreEndpoints.reserve(nSimCore);
-    for (uint32_t i = 0; i < nSimCore; ++i) {
-        simCoreEndpoints.push_back(std::make_shared<CorvusCModelSimWorkerSynctreeEndpoint>(this, i));
-    }
+CorvusCModelSyncTree::CorvusCModelSyncTree(uint32_t nSimWorker)
+        : topSyncFlag(CorvusSynctreeEndpoint::ValueFlag()),
+            simWorkerSFinishFlag(nSimWorker, CorvusSynctreeEndpoint::ValueFlag()),
+            topEndpoint(nullptr) {
+        topEndpoint = std::make_shared<CorvusCModelTopSynctreeEndpoint>(this);
+        simWorkerEndpoints.reserve(nSimWorker);
+        for (uint32_t i = 0; i < nSimWorker; ++i) {
+                simWorkerEndpoints.push_back(std::make_shared<CorvusCModelSimWorkerSynctreeEndpoint>(this, i));
+        }
 }
 
 CorvusCModelSyncTree::~CorvusCModelSyncTree() {
-    masterEndpoint.reset();
-    simCoreEndpoints.clear();
+    topEndpoint.reset();
+    simWorkerEndpoints.clear();
 }
 
-std::shared_ptr<CorvusCModelMasterSynctreeEndpoint> CorvusCModelSyncTree::getMasterEndpoint() {
-    return masterEndpoint;
+std::shared_ptr<CorvusCModelTopSynctreeEndpoint> CorvusCModelSyncTree::getTopEndpoint() {
+    return topEndpoint;
 }
 
-std::shared_ptr<CorvusCModelSimWorkerSynctreeEndpoint> CorvusCModelSyncTree::getSimCoreEndpoint(uint32_t id) {
-    if (id >= simCoreEndpoints.size()) {
-        throw std::out_of_range("Invalid sim core endpoint id");
+std::shared_ptr<CorvusCModelSimWorkerSynctreeEndpoint> CorvusCModelSyncTree::getSimWorkerEndpoint(uint32_t id) {
+    if (id >= simWorkerEndpoints.size()) {
+        throw std::out_of_range("Invalid sim worker endpoint id");
     }
-    return simCoreEndpoints[id];
+    return simWorkerEndpoints[id];
 }
 
-const std::vector<std::shared_ptr<CorvusCModelSimWorkerSynctreeEndpoint>>& CorvusCModelSyncTree::getSimCoreEndpoints() const {
-    return simCoreEndpoints;
+const std::vector<std::shared_ptr<CorvusCModelSimWorkerSynctreeEndpoint>>& CorvusCModelSyncTree::getSimWorkerEndpoints() const {
+    return simWorkerEndpoints;
 }
 
-uint32_t CorvusCModelSyncTree::getSimCoreCount() const {
-    return static_cast<uint32_t>(simCoreEndpoints.size());
+uint32_t CorvusCModelSyncTree::getSimWorkerCount() const {
+    return static_cast<uint32_t>(simWorkerEndpoints.size());
 }
 
-CorvusCModelMasterSynctreeEndpoint::CorvusCModelMasterSynctreeEndpoint(CorvusCModelSyncTree* tree)
+CorvusCModelTopSynctreeEndpoint::CorvusCModelTopSynctreeEndpoint(CorvusCModelSyncTree* tree)
     : tree(tree) {}
 
-void CorvusCModelMasterSynctreeEndpoint::forceSimCoreReset() {
+void CorvusCModelTopSynctreeEndpoint::forceSimWorkerReset() {
 }
 
-bool CorvusCModelMasterSynctreeEndpoint::isMBusClear() {
+bool CorvusCModelTopSynctreeEndpoint::isMBusClear() {
     return true;
 }
 
-bool CorvusCModelMasterSynctreeEndpoint::isSBusClear() {
+bool CorvusCModelTopSynctreeEndpoint::isSBusClear() {
     return true;
 }
 
 
-CorvusSynctreeEndpoint::ValueFlag CorvusCModelMasterSynctreeEndpoint::getSimCoreSFinishFlag() {
-    return aggregateFlag(tree->simCoreSFinishFlag);
+CorvusSynctreeEndpoint::ValueFlag CorvusCModelTopSynctreeEndpoint::getSimWorkerSFinishFlag() {
+    return aggregateFlag(tree->simWorkerSFinishFlag);
 }
 
-void CorvusCModelMasterSynctreeEndpoint::setMasterSyncFlag(CorvusSynctreeEndpoint::ValueFlag flag) {
-    tree->masterSyncFlag = flag;
+void CorvusCModelTopSynctreeEndpoint::setTopSyncFlag(CorvusSynctreeEndpoint::ValueFlag flag) {
+    tree->topSyncFlag = flag;
 }
 
-void CorvusCModelMasterSynctreeEndpoint::setSimWorkerStartFlag(CorvusSynctreeEndpoint::ValueFlag flag) {
+void CorvusCModelTopSynctreeEndpoint::setSimWorkerStartFlag(CorvusSynctreeEndpoint::ValueFlag flag) {
     tree->simWorkerStartFlag = flag;
 }
 
@@ -85,16 +85,16 @@ CorvusCModelSimWorkerSynctreeEndpoint::CorvusCModelSimWorkerSynctreeEndpoint(Cor
 
 
 void CorvusCModelSimWorkerSynctreeEndpoint::setSFinishFlag(CorvusSynctreeEndpoint::ValueFlag flag) {
-    if (index >= tree->simCoreSFinishFlag.size()) {
-        throw std::out_of_range("Invalid sim core index for S flag");
+    if (index >= tree->simWorkerSFinishFlag.size()) {
+        throw std::out_of_range("Invalid sim worker index for S flag");
     }
-    tree->simCoreSFinishFlag[index] = flag;
+    tree->simWorkerSFinishFlag[index] = flag;
 }
 
-CorvusSynctreeEndpoint::ValueFlag CorvusCModelSimWorkerSynctreeEndpoint::getMasterSyncFlag() {
-    return tree->masterSyncFlag;
+CorvusSynctreeEndpoint::ValueFlag CorvusCModelSimWorkerSynctreeEndpoint::getTopSyncFlag() {
+    return tree->topSyncFlag;
 }
 
-CorvusSynctreeEndpoint::ValueFlag CorvusCModelSimWorkerSynctreeEndpoint::getSimWokerStartFlag() {
+CorvusSynctreeEndpoint::ValueFlag CorvusCModelSimWorkerSynctreeEndpoint::getSimWorkerStartFlag() {
     return tree->simWorkerStartFlag;
 }

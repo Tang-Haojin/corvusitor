@@ -8,42 +8,42 @@
 
 #include "corvus_synctree_endpoint.h"
 
-class CorvusCModelMasterSynctreeEndpoint;
+class CorvusCModelTopSynctreeEndpoint;
 class CorvusCModelSimWorkerSynctreeEndpoint;
 
-// Coordinates sync flags between master and sim cores.
+// Coordinates sync flags between TopModule and SimWorkers.
 class CorvusCModelSyncTree {
 public:
-    explicit CorvusCModelSyncTree(uint32_t nSimCore);
+    explicit CorvusCModelSyncTree(uint32_t nSimWorker);
     ~CorvusCModelSyncTree();
     CorvusCModelSyncTree(const CorvusCModelSyncTree&) = delete;
     CorvusCModelSyncTree& operator=(const CorvusCModelSyncTree&) = delete;
 
-    std::shared_ptr<CorvusCModelMasterSynctreeEndpoint> getMasterEndpoint();
-    std::shared_ptr<CorvusCModelSimWorkerSynctreeEndpoint> getSimCoreEndpoint(uint32_t id);
-    const std::vector<std::shared_ptr<CorvusCModelSimWorkerSynctreeEndpoint>>& getSimCoreEndpoints() const;
-    uint32_t getSimCoreCount() const;
+    std::shared_ptr<CorvusCModelTopSynctreeEndpoint> getTopEndpoint();
+    std::shared_ptr<CorvusCModelSimWorkerSynctreeEndpoint> getSimWorkerEndpoint(uint32_t id);
+    const std::vector<std::shared_ptr<CorvusCModelSimWorkerSynctreeEndpoint>>& getSimWorkerEndpoints() const;
+    uint32_t getSimWorkerCount() const;
 
 private:
-    friend class CorvusCModelMasterSynctreeEndpoint;
+    friend class CorvusCModelTopSynctreeEndpoint;
     friend class CorvusCModelSimWorkerSynctreeEndpoint;
     CorvusSynctreeEndpoint::ValueFlag simWorkerStartFlag;
-    CorvusSynctreeEndpoint::ValueFlag masterSyncFlag;
-    std::vector<CorvusSynctreeEndpoint::ValueFlag> simCoreSFinishFlag;
-    std::shared_ptr<CorvusCModelMasterSynctreeEndpoint> masterEndpoint;
-    std::vector<std::shared_ptr<CorvusCModelSimWorkerSynctreeEndpoint>> simCoreEndpoints;
+    CorvusSynctreeEndpoint::ValueFlag topSyncFlag;
+    std::vector<CorvusSynctreeEndpoint::ValueFlag> simWorkerSFinishFlag;
+    std::shared_ptr<CorvusCModelTopSynctreeEndpoint> topEndpoint;
+    std::vector<std::shared_ptr<CorvusCModelSimWorkerSynctreeEndpoint>> simWorkerEndpoints;
 };
 
-class CorvusCModelMasterSynctreeEndpoint : public CorvusTopSynctreeEndpoint {
+class CorvusCModelTopSynctreeEndpoint : public CorvusTopSynctreeEndpoint {
 public:
-    explicit CorvusCModelMasterSynctreeEndpoint(CorvusCModelSyncTree* tree);
-    ~CorvusCModelMasterSynctreeEndpoint() override = default;
+    explicit CorvusCModelTopSynctreeEndpoint(CorvusCModelSyncTree* tree);
+    ~CorvusCModelTopSynctreeEndpoint() override = default;
 
-    void forceSimCoreReset() override;
+    void forceSimWorkerReset() override;
     bool isMBusClear() override;
     bool isSBusClear() override;
-    ValueFlag getSimCoreSFinishFlag() override;
-    void setMasterSyncFlag(ValueFlag flag) override;
+    ValueFlag getSimWorkerSFinishFlag() override;
+    void setTopSyncFlag(ValueFlag flag) override;
     void setSimWorkerStartFlag(ValueFlag flag) override;
 private:
     CorvusCModelSyncTree* tree;
@@ -55,8 +55,8 @@ public:
     ~CorvusCModelSimWorkerSynctreeEndpoint() override = default;
 
     void setSFinishFlag(ValueFlag flag) override;
-    ValueFlag getMasterSyncFlag() override;
-    ValueFlag getSimWokerStartFlag() override;
+    ValueFlag getTopSyncFlag() override;
+    ValueFlag getSimWorkerStartFlag() override;
 
 private:
     CorvusCModelSyncTree* tree;

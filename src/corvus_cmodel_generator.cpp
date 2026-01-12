@@ -171,8 +171,8 @@ bool CorvusCModelGenerator::generate(const ConnectionAnalysis& analysis,
   os << "  void stopWorkers();\n";
   os << "  void reset();\n\n";
   os << "  CorvusCModelSyncTree syncTree_;\n";
-  os << "  std::shared_ptr<CorvusCModelMasterSynctreeEndpoint> masterEndpoint_;\n";
-  os << "  std::vector<std::shared_ptr<CorvusCModelSimWorkerSynctreeEndpoint>> simEndpoints_;\n";
+  os << "  std::shared_ptr<CorvusCModelTopSynctreeEndpoint> topEndpoint_;\n";
+  os << "  std::vector<std::shared_ptr<CorvusCModelSimWorkerSynctreeEndpoint>> simWorkerEndpoints_;\n";
   os << "  std::vector<std::shared_ptr<CorvusCModelIdealizedBus>> mBuses_;\n";
   os << "  std::vector<std::shared_ptr<CorvusCModelIdealizedBus>> sBuses_;\n";
   os << "  std::vector<CorvusBusEndpoint*> topMBusEndpoints_;\n";
@@ -185,8 +185,8 @@ bool CorvusCModelGenerator::generate(const ConnectionAnalysis& analysis,
 
   os << "inline " << cmodel_class << "::" << cmodel_class << "()\n";
   os << "    : syncTree_(kCorvusCModelWorkerCount),\n";
-  os << "      masterEndpoint_(syncTree_.getMasterEndpoint()),\n";
-  os << "      simEndpoints_(syncTree_.getSimCoreEndpoints()) {\n";
+  os << "      topEndpoint_(syncTree_.getTopEndpoint()),\n";
+  os << "      simWorkerEndpoints_(syncTree_.getSimWorkerEndpoints()) {\n";
   os << "  buildBuses();\n";
   os << "  buildTop();\n";
   os << "  buildWorkers();\n";
@@ -213,7 +213,7 @@ bool CorvusCModelGenerator::generate(const ConnectionAnalysis& analysis,
   os << "}\n\n";
 
   os << "inline void " << cmodel_class << "::buildTop() {\n";
-  os << "  top_ = std::make_shared<" << top_class << ">(masterEndpoint_.get(), topMBusEndpoints_);\n";
+  os << "  top_ = std::make_shared<" << top_class << ">(topEndpoint_.get(), topMBusEndpoints_);\n";
   os << "}\n\n";
 
   os << "inline void " << cmodel_class << "::buildWorkers() {\n";
@@ -231,7 +231,7 @@ bool CorvusCModelGenerator::generate(const ConnectionAnalysis& analysis,
     os << "    for (uint32_t b = 0; b < kCorvusCModelSBusCount; ++b) {\n";
       os << "      sEndpoints.push_back(sBuses_[b]->getEndpoint(" << (pid + 1) << ").get());\n";
     os << "    }\n";
-    os << "    auto worker = std::make_shared<" << worker_class_name(output_base, pid) << ">(simEndpoints_.at(" << idx << ").get(), mEndpoints, sEndpoints);\n";
+    os << "    auto worker = std::make_shared<" << worker_class_name(output_base, pid) << ">(simWorkerEndpoints_.at(" << idx << ").get(), mEndpoints, sEndpoints);\n";
     os << "    workers_.push_back(worker);\n";
     os << "  }\n";
   }

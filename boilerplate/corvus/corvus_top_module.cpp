@@ -4,15 +4,15 @@
 #include <cstdint>
 
 
-CorvusTopModule::CorvusTopModule(CorvusTopSynctreeEndpoint* masterSynctreeEndpoint,
-                                 std::vector<CorvusBusEndpoint*> mBusEndpoints)
-    : synctreeEndpoint(masterSynctreeEndpoint),
+CorvusTopModule::CorvusTopModule(CorvusTopSynctreeEndpoint* topSynctreeEndpoint,
+                                                                 std::vector<CorvusBusEndpoint*> mBusEndpoints)
+        : synctreeEndpoint(topSynctreeEndpoint),
       mBusEndpoints(std::move(mBusEndpoints)) {
 }
 
 CorvusTopModule::~CorvusTopModule() {
     std::cout << "[CorvusTopModule] Destructor state: "
-              << "masterSyncFlag=" << static_cast<unsigned int>(masterSyncFlag.getValue())
+              << "topSyncFlag=" << static_cast<unsigned int>(topSyncFlag.getValue())
               << ", prevSFinishFlag=" << static_cast<unsigned int>(prevSFinishFlag.getValue())
               << ", lastStage=" << lastStage
               << ", evalCount=" << evalCount
@@ -20,7 +20,7 @@ CorvusTopModule::~CorvusTopModule() {
 
     if (synctreeEndpoint) {
         std::cout << "[CorvusTopModule] Synctree flags at teardown: "
-                  << ", simCoreSFinish=" << static_cast<unsigned int>(synctreeEndpoint->getSimCoreSFinishFlag().getValue())
+                  << ", simWorkerSFinish=" << static_cast<unsigned int>(synctreeEndpoint->getSimWorkerSFinishFlag().getValue())
                   << ", mBusClear=" << (synctreeEndpoint->isMBusClear() ? "true" : "false")
                   << ", sBusClear=" << (synctreeEndpoint->isSBusClear() ? "true" : "false")
                   << std::endl;
@@ -38,10 +38,10 @@ void CorvusTopModule::eval() {
     logStage("eval_start");
     sendIAndEOutput();
     while(!synctreeEndpoint->isMBusClear() || !synctreeEndpoint->isSBusClear()) {}
-    raiseMasterSyncFlag();
-    logStage(std::string("master sync flag raised to ") + std::to_string(masterSyncFlag.getValue()));
+    raiseTopSyncFlag();
+    logStage(std::string("top sync flag raised to ") + std::to_string(topSyncFlag.getValue()));
     logStage("waiting for S finish");
-    while(!synctreeEndpoint->isMBusClear() || !allSimCoreSFinish()) {}
+    while(!synctreeEndpoint->isMBusClear() || !allSimWorkerSFinish()) {}
     logStage("S finish detected");
     loadOAndEInput();
     logStage("eval_done");
@@ -51,28 +51,28 @@ void CorvusTopModule::evalE() {
     eHandle->eval();
 }
 
-bool CorvusTopModule::allSimCoreSFinish() {
-    if(synctreeEndpoint->getSimCoreSFinishFlag().getValue() == prevSFinishFlag.getValue()) {
+bool CorvusTopModule::allSimWorkerSFinish() {
+    if(synctreeEndpoint->getSimWorkerSFinishFlag().getValue() == prevSFinishFlag.getValue()) {
         return false;
-    } else if (synctreeEndpoint->getSimCoreSFinishFlag().getValue() == 0) {
+    } else if (synctreeEndpoint->getSimWorkerSFinishFlag().getValue() == 0) {
         // pending state
         return false;
-    } else if (synctreeEndpoint->getSimCoreSFinishFlag().getValue() == prevSFinishFlag.nextValue()) {
+    } else if (synctreeEndpoint->getSimWorkerSFinishFlag().getValue() == prevSFinishFlag.nextValue()) {
         prevSFinishFlag.updateToNext();
         return true;
     } else {
         // 丢步，严重错误
-        std::cerr << "[CorvusTopModule] Fatal error: SimCore S finish flag jumped from "
+        std::cerr << "[CorvusTopModule] Fatal error: SimWorker S finish flag jumped from "
                   << static_cast<int>(prevSFinishFlag.getValue()) << " to "
-                  << static_cast<int>(synctreeEndpoint->getSimCoreSFinishFlag().getValue())
+                  << static_cast<int>(synctreeEndpoint->getSimWorkerSFinishFlag().getValue())
                   << std::endl;
         exit(1);
     }
 }
 
-void CorvusTopModule::raiseMasterSyncFlag() {
-    masterSyncFlag.updateToNext();
-    synctreeEndpoint->setMasterSyncFlag(masterSyncFlag);
+void CorvusTopModule::raiseTopSyncFlag() {
+    topSyncFlag.updateToNext();
+    synctreeEndpoint->setTopSyncFlag(topSyncFlag);
 }
 
 void CorvusTopModule::clearMBusRecvBuffer() {

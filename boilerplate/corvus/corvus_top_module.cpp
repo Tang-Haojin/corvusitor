@@ -51,10 +51,6 @@ void CorvusTopModule::evalE() {
     eHandle->eval();
 }
 
-bool CorvusTopModule::allSimCoreCFinish() {
-    return false;
-}
-
 bool CorvusTopModule::allSimCoreSFinish() {
     if(synctreeEndpoint->getSimCoreSFinishFlag().getValue() == prevSFinishFlag.getValue()) {
         return false;

@@ -55,8 +55,6 @@ void CorvusSimWorker::loop() {
 void CorvusSimWorker::stop() {
     loopContinue = false;
 }
-void CorvusSimWorker::raiseCFinishFlag() {
-}
 
 void CorvusSimWorker::raiseSFinishFlag() {
     sFinishFlag.updateToNext();

@@ -29,7 +29,6 @@ private:
     friend class CorvusCModelSimWorkerSynctreeEndpoint;
     CorvusSynctreeEndpoint::ValueFlag simWorkerStartFlag;
     CorvusSynctreeEndpoint::ValueFlag masterSyncFlag;
-    std::vector<CorvusSynctreeEndpoint::ValueFlag> simCoreCFinishFlag;
     std::vector<CorvusSynctreeEndpoint::ValueFlag> simCoreSFinishFlag;
     std::shared_ptr<CorvusCModelMasterSynctreeEndpoint> masterEndpoint;
     std::vector<std::shared_ptr<CorvusCModelSimWorkerSynctreeEndpoint>> simCoreEndpoints;

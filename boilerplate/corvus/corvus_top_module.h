@@ -24,13 +24,11 @@ protected:
     virtual void loadOAndEInput() = 0;
 
 private:
-    CorvusSynctreeEndpoint::ValueFlag prevCFinishFlag;
     CorvusSynctreeEndpoint::ValueFlag prevSFinishFlag;
     CorvusSynctreeEndpoint::ValueFlag masterSyncFlag;
     std::string lastStage = "init";
     uint64_t evalCount = 0;
 
-    bool allSimCoreCFinish();
     bool allSimCoreSFinish();
     void raiseMasterSyncFlag();
     void clearMBusRecvBuffer();

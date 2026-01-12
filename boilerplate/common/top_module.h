@@ -19,7 +19,7 @@ public:
     }
 
     TopPorts* topPorts = nullptr;
-    virtual void resetSimWorker() = 0;
+    virtual void prepareSimWorker() = 0;
     virtual void evalE() {
         eHandle->eval();
     }

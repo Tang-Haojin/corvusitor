@@ -159,6 +159,7 @@ bool CorvusCModelGenerator::generate(const ConnectionAnalysis& analysis,
   os << "  }\n";
   os << "  const std::vector<std::shared_ptr<CorvusSimWorker>>& workers() const { return workers_; }\n\n";
   os << "  void eval();\n";
+  os << "  void stop();\n";
   os << "\nprivate:\n";
   os << "  void buildBuses();\n";
   os << "  void buildTop();\n";
@@ -194,8 +195,7 @@ bool CorvusCModelGenerator::generate(const ConnectionAnalysis& analysis,
   os << "}\n\n";
 
   os << "inline " << cmodel_class << "::~" << cmodel_class << "() {\n";
-  os << "  stopWorkers();\n";
-  os << "  cleanupModules();\n";
+  os << "  stop();\n";
   os << "}\n\n";
 
   os << "inline void " << cmodel_class << "::buildBuses() {\n";
@@ -277,9 +277,14 @@ bool CorvusCModelGenerator::generate(const ConnectionAnalysis& analysis,
   os << "  }\n";
   os << "}\n\n";
 
+  os << "inline void " << cmodel_class << "::stop() {\n";
+  os << "  stopWorkers();\n";
+  os << "  cleanupModules();\n";
+  os << "}\n\n";
+
   os << "inline void " << cmodel_class << "::reset() {\n";
   os << "  ensureInitialized();\n";
-  os << "  if (top_) top_->resetSimWorker();\n";
+  os << "  if (top_) top_->prepareSimWorker();\n";
   os << "}\n\n";
 
   os << "inline void " << cmodel_class << "::eval() {\n";

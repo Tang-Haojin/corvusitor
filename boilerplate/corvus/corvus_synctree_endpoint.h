@@ -7,6 +7,9 @@ class CorvusSynctreeEndpoint{
     public:
     class ValueFlag {
     public:
+        constexpr static uint8_t START_GUARD = 0xBE;
+        ValueFlag(): value(0) {}
+        ValueFlag(uint8_t v): value(v) {}
         uint8_t getValue() const {
             return value;
         }
@@ -20,9 +23,13 @@ class CorvusSynctreeEndpoint{
         void reset() {
             value = 0;
         }
+        void setValue(uint8_t v) {
+            value = v;
+        }
     private:
         uint8_t value = 0;
         constexpr static uint8_t MASK = 0xFF;
+        
     };
 };
 
@@ -34,6 +41,7 @@ public:
   virtual bool isSBusClear() = 0;
   virtual ValueFlag getSimCoreSFinishFlag() = 0;
   virtual void setMasterSyncFlag(ValueFlag flag) = 0;
+  virtual void setSimWorkerStartFlag(ValueFlag flag) = 0;
 };
 
 class CorvusSimWorkerSynctreeEndpoint : public CorvusSynctreeEndpoint {
@@ -41,5 +49,6 @@ public:
     virtual ~CorvusSimWorkerSynctreeEndpoint() = default;
     virtual void setSFinishFlag(ValueFlag flag) = 0;
     virtual ValueFlag getMasterSyncFlag() = 0;
+    virtual ValueFlag getSimWokerStartFlag() = 0;
 };
 #endif

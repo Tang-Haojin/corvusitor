@@ -19,7 +19,8 @@ CorvusSimWorker::CorvusSimWorker(CorvusSimWorkerSynctreeEndpoint* simCoreSynctre
                                  std::string workerName)
     : synctreeEndpoint(simCoreSynctreeEndpoint),
       mBusEndpoints(std::move(mBusEndpoints)),
-      sBusEndpoints(std::move(sBusEndpoints)) {
+      sBusEndpoints(std::move(sBusEndpoints)),
+      loopContinue(true) {
     setGeneratedName(std::move(workerName));
 }
 
@@ -43,7 +44,7 @@ CorvusSimWorker::~CorvusSimWorker() {
 void CorvusSimWorker::loop() {
     ensureWorkerName();
     printf("SimWorker(%s) loop started\n", workerName.empty() ? "unnamed" : workerName.c_str());
-    while(1) {
+    while(loopContinue) {
         loopCount++;
         logStage("waiting for master sync");
         while(!isMasterSyncFlagRaised());
@@ -60,12 +61,19 @@ void CorvusSimWorker::loop() {
     }
 }
 
+void CorvusSimWorker::stop() {
+    loopContinue = false;
+}
 void CorvusSimWorker::raiseCFinishFlag() {
 }
 
 void CorvusSimWorker::raiseSFinishFlag() {
     sFinishFlag.updateToNext();
     synctreeEndpoint->setSFinishFlag(sFinishFlag);
+}
+
+bool CorvusSimWorker::hasStartFlagSeen() {
+    return synctreeEndpoint->getSimWokerStartFlag().getValue() == CorvusSynctreeEndpoint::ValueFlag::START_GUARD;
 }
 
 bool CorvusSimWorker::isMasterSyncFlagRaised() {
@@ -83,7 +91,7 @@ bool CorvusSimWorker::isMasterSyncFlagRaised() {
                   << " or " << static_cast<int>(prevMasterSyncFlag.nextValue()) << ")"
                   << " in SimWorker(" << (workerName.empty() ? "unnamed" : workerName) << ")"
                   << std::endl;
-        std::exit(1);
+        stop();
     }
 }
 

@@ -27,12 +27,12 @@ public:
 private:
     friend class CorvusCModelMasterSynctreeEndpoint;
     friend class CorvusCModelSimWorkerSynctreeEndpoint;
+    CorvusSynctreeEndpoint::ValueFlag simWorkerStartFlag;
     CorvusSynctreeEndpoint::ValueFlag masterSyncFlag;
     std::vector<CorvusSynctreeEndpoint::ValueFlag> simCoreCFinishFlag;
     std::vector<CorvusSynctreeEndpoint::ValueFlag> simCoreSFinishFlag;
     std::shared_ptr<CorvusCModelMasterSynctreeEndpoint> masterEndpoint;
     std::vector<std::shared_ptr<CorvusCModelSimWorkerSynctreeEndpoint>> simCoreEndpoints;
-    mutable std::mutex mu;
 };
 
 class CorvusCModelMasterSynctreeEndpoint : public CorvusTopSynctreeEndpoint {
@@ -45,7 +45,7 @@ public:
     bool isSBusClear() override;
     ValueFlag getSimCoreSFinishFlag() override;
     void setMasterSyncFlag(ValueFlag flag) override;
-
+    void setSimWorkerStartFlag(ValueFlag flag) override;
 private:
     CorvusCModelSyncTree* tree;
 };
@@ -57,6 +57,7 @@ public:
 
     void setSFinishFlag(ValueFlag flag) override;
     ValueFlag getMasterSyncFlag() override;
+    ValueFlag getSimWokerStartFlag() override;
 
 private:
     CorvusCModelSyncTree* tree;

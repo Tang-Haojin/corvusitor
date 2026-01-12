@@ -28,7 +28,8 @@ CorvusTopModule::~CorvusTopModule() {
     }
 }
 
-void CorvusTopModule::resetSimWorker() {
+void CorvusTopModule::prepareSimWorker() {
+    synctreeEndpoint->setSimWorkerStartFlag(CorvusSynctreeEndpoint::ValueFlag::START_GUARD);
 }
 
 void CorvusTopModule::eval() {

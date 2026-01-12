@@ -76,6 +76,10 @@ void CorvusCModelMasterSynctreeEndpoint::setMasterSyncFlag(CorvusSynctreeEndpoin
     tree->masterSyncFlag = flag;
 }
 
+void CorvusCModelMasterSynctreeEndpoint::setSimWorkerStartFlag(CorvusSynctreeEndpoint::ValueFlag flag) {
+    tree->simWorkerStartFlag = flag;
+}
+
 CorvusCModelSimWorkerSynctreeEndpoint::CorvusCModelSimWorkerSynctreeEndpoint(CorvusCModelSyncTree* tree, uint32_t idx)
     : tree(tree), index(idx) {}
 
@@ -89,4 +93,8 @@ void CorvusCModelSimWorkerSynctreeEndpoint::setSFinishFlag(CorvusSynctreeEndpoin
 
 CorvusSynctreeEndpoint::ValueFlag CorvusCModelSimWorkerSynctreeEndpoint::getMasterSyncFlag() {
     return tree->masterSyncFlag;
+}
+
+CorvusSynctreeEndpoint::ValueFlag CorvusCModelSimWorkerSynctreeEndpoint::getSimWokerStartFlag() {
+    return tree->simWorkerStartFlag;
 }

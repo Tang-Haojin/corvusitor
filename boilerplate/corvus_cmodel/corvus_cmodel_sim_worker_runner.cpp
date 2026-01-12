@@ -29,6 +29,12 @@ void CorvusCModelSimWorkerRunner::run() {
 }
 
 void CorvusCModelSimWorkerRunner::stop() {
+    for (auto& worker : simWorkers) {
+        if (worker) {
+            worker->stop();
+        }
+    }
+
     for (auto& t : threads) {
 #if defined(__unix__) || defined(__APPLE__)
         pthread_cancel(t.native_handle());

@@ -13,7 +13,7 @@ public:
     CorvusTopModule(CorvusTopSynctreeEndpoint* masterSynctreeEndpoint,
                     std::vector<CorvusBusEndpoint*> mBusEndpoints);
     ~CorvusTopModule() override;
-    void resetSimWorker() override;
+    void prepareSimWorker() override;
     void eval() override;
     void evalE() override;
 

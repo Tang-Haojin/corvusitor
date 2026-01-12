@@ -17,6 +17,7 @@ class CorvusSimWorker : public SimWorker {
                         std::vector<CorvusBusEndpoint*> sBusEndpoints,
                         std::string workerName);
         void loop() override;
+        void stop();
         const std::string& name() const { return workerName; }
         void setName(std::string name);
     protected:
@@ -36,9 +37,11 @@ class CorvusSimWorker : public SimWorker {
         std::string lastStage = "init";
         uint64_t loopCount = 0;
         std::string workerName;
+        bool loopContinue;
         void ensureWorkerName();
         void raiseCFinishFlag();
         void raiseSFinishFlag();
+        bool hasStartFlagSeen();
         bool isMasterSyncFlagRaised();
         void logStage(std::string stageLabel);
 };

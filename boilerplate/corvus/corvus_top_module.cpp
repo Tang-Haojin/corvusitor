@@ -1,6 +1,7 @@
 #include "corvus_top_module.h"
 #include <utility>
 #include <iostream>
+#include <cstdint>
 
 
 CorvusTopModule::CorvusTopModule(CorvusTopSynctreeEndpoint* masterSynctreeEndpoint,
@@ -11,15 +12,15 @@ CorvusTopModule::CorvusTopModule(CorvusTopSynctreeEndpoint* masterSynctreeEndpoi
 
 CorvusTopModule::~CorvusTopModule() {
     std::cout << "[CorvusTopModule] Destructor state: "
-              << "masterSyncFlag=" << masterSyncFlag.getValue()
-              << ", prevSFinishFlag=" << masterSyncFlag.getValue()
+              << "masterSyncFlag=" << static_cast<unsigned int>(masterSyncFlag.getValue())
+              << ", prevSFinishFlag=" << static_cast<unsigned int>(prevSFinishFlag.getValue())
               << ", lastStage=" << lastStage
               << ", evalCount=" << evalCount
               << std::endl;
 
     if (synctreeEndpoint) {
         std::cout << "[CorvusTopModule] Synctree flags at teardown: "
-                  << ", simCoreSFinish=" << synctreeEndpoint->getSimCoreSFinishFlag().getValue()
+                  << ", simCoreSFinish=" << static_cast<unsigned int>(synctreeEndpoint->getSimCoreSFinishFlag().getValue())
                   << ", mBusClear=" << (synctreeEndpoint->isMBusClear() ? "true" : "false")
                   << ", sBusClear=" << (synctreeEndpoint->isSBusClear() ? "true" : "false")
                   << std::endl;

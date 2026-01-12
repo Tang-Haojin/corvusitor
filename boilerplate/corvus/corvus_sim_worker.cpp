@@ -1,6 +1,7 @@
 #include "corvus_sim_worker.h"
 #include <cstdio>
 #include <iostream>
+#include <thread>
 #include <typeinfo>
 #include <utility>
 
@@ -28,13 +29,13 @@ CorvusSimWorker::~CorvusSimWorker() {
     ensureWorkerName();
     std::cout << "[CorvusSimWorker] Destructor state: "
               << "name=" << (workerName.empty() ? "<unnamed>" : workerName)
-              << ", sFinishFlag=" << sFinishFlag.getValue()
-              << ", prevMasterSyncFlag=" << prevMasterSyncFlag.getValue()
+              << ", sFinishFlag=" << static_cast<int>(sFinishFlag.getValue())
+              << ", prevMasterSyncFlag=" << static_cast<int>(prevMasterSyncFlag.getValue())
               << ", lastStage=" << lastStage 
               << ", loopCount=" << loopCount;
     if (synctreeEndpoint) {
         std::cout << ", masterSyncFlag(now)="
-                  << synctreeEndpoint->getMasterSyncFlag().getValue();
+                  << static_cast<int>(synctreeEndpoint->getMasterSyncFlag().getValue());
     } else {
         std::cout << ", synctreeEndpoint=null";
     }
@@ -47,7 +48,11 @@ void CorvusSimWorker::loop() {
     while(loopContinue) {
         loopCount++;
         logStage("waiting for master sync");
-        while(!isMasterSyncFlagRaised());
+        while(loopContinue && !isMasterSyncFlagRaised()) {
+            // yield to allow stop requests to be observed promptly
+            std::this_thread::yield();
+        }
+        if (!loopContinue) break;
         logStage(std::string("get master sync flag as ") + std::to_string(prevMasterSyncFlag.getValue()));
         loadRemoteCInputs();
         cModule->eval();
@@ -92,6 +97,7 @@ bool CorvusSimWorker::isMasterSyncFlagRaised() {
                   << " in SimWorker(" << (workerName.empty() ? "unnamed" : workerName) << ")"
                   << std::endl;
         stop();
+        return false;
     }
 }
 

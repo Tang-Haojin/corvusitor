@@ -25,11 +25,11 @@ class CorvusSimWorker : public SimWorker {
         virtual void loadSInputs() = 0;
         virtual void sendRemoteSOutputs() = 0;
         virtual void loadLocalCInputs() = 0;
+        uint64_t loopCount = 0;
     private:
         CorvusSynctreeEndpoint::ValueFlag sFinishFlag;
         CorvusSynctreeEndpoint::ValueFlag prevTopSyncFlag;
         std::string lastStage = "init";
-        uint64_t loopCount = 0;
         std::string workerName;
         bool loopContinue;
         void raiseSFinishFlag();

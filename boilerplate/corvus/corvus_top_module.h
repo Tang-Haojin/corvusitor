@@ -22,12 +22,13 @@ protected:
     std::vector<CorvusBusEndpoint*> mBusEndpoints;
     virtual void sendIAndEOutput() = 0;
     virtual void loadOAndEInput() = 0;
+    uint64_t evalCount = 0;
 
 private:
     CorvusSynctreeEndpoint::ValueFlag prevSFinishFlag;
     CorvusSynctreeEndpoint::ValueFlag topSyncFlag;
     std::string lastStage = "init";
-    uint64_t evalCount = 0;
+    
 
     bool allSimWorkerSFinish();
     void raiseTopSyncFlag();

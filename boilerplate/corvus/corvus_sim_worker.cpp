@@ -31,6 +31,7 @@ CorvusSimWorker::~CorvusSimWorker() {
 
 void CorvusSimWorker::loop() {
     printf("SimWorker(%s) loop started\n", workerName.empty() ? "unnamed" : workerName.c_str());
+    while(!hasStartFlagSeen()){}
     while(loopContinue) {
         loopCount++;
         logStage("waiting for top sync");

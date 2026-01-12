@@ -671,6 +671,81 @@ std::string generate_worker_cpp(const std::string& output_base,
     os << "      if (!ep) continue;\n";
     os << "      while (ep->bufferCnt() > 0) {\n";
     os << "        uint64_t payload = ep->recv();\n";
+    os << "        uint32_t slotId = static_cast<uint32_t>(payload & corvus_helper::mask_bits(slotBits));\n";
+    if (!direct_slots.empty()) {
+      os << "        bool handled = false;\n";
+      os << "        switch (slotId) {\n";
+      for (const auto* slot : direct_slots) {
+        os << "        case " << slot->slot_id << ": {\n";
+        os << "          uint64_t data = (payload >> slotBits) & corvus_helper::mask_bits(" << slot->sig.width << ");\n";
+        os << "          comb->" << slot->sig.name << " = static_cast<" << cpp_type_from_signal(slot->sig) << ">(data);\n";
+        os << "          handled = true;\n";
+        os << "          break;\n";
+        os << "        }\n";
+      }
+      os << "        default: break;\n";
+      os << "        }\n";
+    }
+    if (!decode_slots.empty()) {
+      if (!direct_slots.empty()) {
+        os << "        if (handled) continue;\n";
+      }
+      os << "        auto it = slotIndex.find(slotId);\n";
+      os << "        if (it == slotIndex.end()) continue;\n";
+      os << "        decoders[it->second].consume(payload);\n";
+    }
+    os << "      }\n";
+    os << "    }\n";
+    if (!decode_slots.empty()) {
+      os << "    for (size_t idx = 0; idx < decoders.size(); ++idx) {\n";
+      os << "      if (!decoders[idx].complete()) continue;\n";
+      os << "      switch (idx) {\n";
+      size_t ri = 0;
+      for (const auto& slot : wp.downlinks) {
+        if (slot.chunk.chunk_count == 1 && slot.sig.width_type != PortWidthType::VL_W) { ++ri; continue; }
+        os << "      case " << ri << ": {\n";
+        if (slot.sig.width_type == PortWidthType::VL_W) {
+          os << "        corvus_helper::apply_to_wide(decoders[idx], reinterpret_cast<uint32_t*>(&comb->" << slot.sig.name << "), " << slot.sig.array_size << ");\n";
+        } else {
+          os << "        uint64_t value = corvus_helper::assemble_scalar(decoders[idx]);\n";
+          os << "        comb->" << slot.sig.name << " = static_cast<" << cpp_type_from_signal(slot.sig) << ">(value & corvus_helper::mask_bits(" << slot.sig.width << "));\n";
+        }
+        os << "        break;\n";
+        os << "      }\n";
+        ++ri;
+      }
+      os << "      default: break;\n";
+      os << "      }\n";
+      os << "    }\n";
+    }
+    os << "  }\n";
+  }
+  if (!wp.remote_recv.empty()) {
+    os << "  {\n";
+    os << "    const uint8_t slotBits = " << wp.remote_slot_bits << ";\n";
+    std::vector<const RemoteRecvSlot*> direct_slots;
+    std::vector<const RemoteRecvSlot*> decode_slots;
+    for (const auto& slot : wp.remote_recv) {
+      if (slot.chunk.chunk_count == 1 && slot.sig.width_type != PortWidthType::VL_W) {
+        direct_slots.push_back(&slot);
+      } else {
+        decode_slots.push_back(&slot);
+      }
+    }
+    if (!decode_slots.empty()) {
+      os << "    std::vector<detail::SlotDecoder> decoders;\n";
+      os << "    std::unordered_map<uint32_t, size_t> slotIndex;\n";
+      os << "    decoders.reserve(" << decode_slots.size() << ");\n";
+      for (const auto* slot : decode_slots) {
+        os << "    decoders.emplace_back(" << slot->slot_id << ", " << slot->slot_bits << ", "
+           << slot->chunk.data_bits << ", " << slot->chunk.chunk_bits << ", " << slot->chunk.chunk_count << ");\n";
+        os << "    slotIndex[" << slot->slot_id << "] = decoders.size() - 1;\n";
+      }
+    }
+    os << "    for (auto* ep : this->sBusEndpoints) {\n";
+    os << "      if (!ep) continue;\n";
+    os << "      while (ep->bufferCnt() > 0) {\n";
+    os << "        uint64_t payload = ep->recv();\n";
     os << "        uint32_t slotId = static_cast<uint32_t>(payload & detail::mask_bits(slotBits));\n";
     if (!direct_slots.empty()) {
       os << "        bool handled = false;\n";
@@ -701,7 +776,7 @@ std::string generate_worker_cpp(const std::string& output_base,
       os << "      if (!decoders[idx].complete()) continue;\n";
       os << "      switch (idx) {\n";
       size_t ri = 0;
-      for (const auto& slot : wp.downlinks) {
+      for (const auto& slot : wp.remote_recv) {
         if (slot.chunk.chunk_count == 1 && slot.sig.width_type != PortWidthType::VL_W) { ++ri; continue; }
         os << "      case " << ri << ": {\n";
         if (slot.sig.width_type == PortWidthType::VL_W) {
@@ -786,7 +861,7 @@ std::string generate_worker_cpp(const std::string& output_base,
   if (remote_it != remote_send_map.end()) {
     for (const auto* slot : remote_it->second) {
       os << "  {\n";
-      os << "    CorvusBusEndpoint* ep = sBusEndpoints[" << slot->bus_index << "];\n";
+      os << "    CorvusBusEndpoint* ep = this->sBusEndpoints[" << slot->bus_index << "];\n";
       os << "    const uint8_t slotBits = " << slot->slot_bits << ";\n";
       os << "    const uint32_t slotId = " << slot->slot_id << ";\n";
       os << "    const uint8_t dataBits = " << slot->chunk.data_bits << ";\n";

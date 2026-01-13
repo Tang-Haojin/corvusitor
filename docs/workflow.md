@@ -27,11 +27,10 @@
 > 说明：`--output-dir` 控制输出目录，`--output-name` 控制输出前缀（决定类名/文件名中的 `<output>` 部分），二者拼成完整路径，不再将目录与名称混用。生成文件名与类名保持一致的驼峰风格，便于跨平台。
 
 ## 运行时数据流（一个周期内）
-- Top → Worker（MBus）：`sendIAndEOutput` 将 I/Eo 按 slot+chunk 编码（round-robin 分配到 mBusEndpoints），`targetId` 为目标分区+1。
-- Worker → Top（MBus）：`sendRemoteCOutputs` 将 O/Ei 发送到 `targetId=0`；Top 在 `loadOAndEInput` 解码写回 TopPorts / external。
-- Worker ↔ Worker（SBus）：`sendRemoteSOutputs` 将 `remote_s_to_c` 发送到目标分区；`loadRemoteCInputs`/`loadSInputs` 轮询 mBus/sBus 端点解码拼装。
+- Top → Worker（MBus）：`sendIAndEOutput` 将 I/Eo 分发到 mBusEndpoints，`targetId` 为目标分区+1。
+- Worker → Top（MBus）：`sendRemoteCOutputs` 将 O/Ei 发送到 `targetId=0`；Top 在 `loadOAndEInput` 写回 TopPorts / external。
+- Worker ↔ Worker（SBus）：`sendRemoteSOutputs` 将 `remote_s_to_c` 发送到目标分区；`loadRemoteCInputs`/`loadSInputs` 轮询 mBus/sBus 端点汇聚。
 - 本地直连：`loadSInputs` 负责 Ct→Si 拷贝，`loadLocalCInputs` 负责 St→Ci 拷贝，避免上总线。
-- 接收端必须耗尽所有端点的 `bufferCnt`，基于 slotId+chunkIdx 重组；VlWide 通过 `corvus_helper` 做跨 word 处理。
 
 ## 同步时序（当前实现）
 - 顶层 Top 周期（参考 [boilerplate/corvus/corvus_top_module.cpp](boilerplate/corvus/corvus_top_module.cpp)）
@@ -56,13 +55,6 @@
    - Worker 若观测到 `getTopSyncFlag()` 出现非期望跳变（既非当前也非 `nextValue()`）将输出致命错误并 `stop()`；顶层若观测到 S 完成标志跳变异常将 `exit(1)`。
    - 顶层对 S 完成的判定为“全体一致”语义，未达一致返回 `0`（PENDING），因此等待可能跨越多个 Worker 的异步完成窗口。
 
-## 编解码与 slot 规划细节（供调试）
-- slot 空间按“接收端”独立规划：Top/每个 Worker 只为自己要接收的信号分配 slotId；发送端按目标的 slotId 发送。
-- slotBits=ceil(log2(slotCount)) 再向上取整到 {8,16,32}。
-- dataBits 选择不超过 (48-slotBits-chunkBits) 的最大值（优先 32/16/8）；若 width 仍超出则提升 chunkBits=8/16/32，并重算 chunkCount=ceil(width/dataBits)。
-- payload 布局：`chunkIdx | data | slotId`，slotId 在最低位；未分片时 chunkBits=0。
-- MBus/SBus 不保证顺序但保证不重不漏，接收端需要基于 slotId+chunkIdx 组帧；正常流程下每轮 buffer 会被耗尽，无需额外 clear。
-
 ## 验证与调试
 - 快速校验：`make test_corvus_gen`（JSON/头文件生成烟测），`make test_corvus_slots`（跨分区 S→C 收发），`make test_corvus_yuquan`（需 YuQuan 工件）。
-- 若 slot/路由异常，可检查生成头文件中的 slotBits/chunkBits 分配与 targetId，或直接查看 JSON 中的连接分类结果。
+- 若路由异常，可检查生成头文件中的 targetId，或直接查看 JSON 中的连接分类结果。

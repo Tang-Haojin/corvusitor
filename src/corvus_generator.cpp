@@ -373,6 +373,9 @@ std::string generate_top_cpp(const std::string& output_base,
   if (external_mod) module_headers.insert(external_mod->header_path);
   (void)mbus_count;
   (void)sbus_count;
+  (void)workers;
+  (void)top_slots;
+  (void)top_slot_bits;
 
   std::ostringstream os;
   os << "#include \"" << path_basename(top_header_name) << "\"\n";
@@ -412,148 +415,13 @@ std::string generate_top_cpp(const std::string& output_base,
     os << "void " << top_class << "::deleteExternalModule() { eHandle = nullptr; }\n";
   }
 
-  // sendIAndEOutput
+  // MBus communication temporarily disabled; TODO: reintroduce once sync strategy settles
   os << "void " << top_class << "::sendIAndEOutput() {\n";
-  os << "  auto* ports = static_cast<" << top_class << "::TopPortsGen*>(topPorts);\n";
-  if (!ext_class.empty()) {
-    os << "  auto* extHandle = static_cast<VerilatorModuleHandle<" << ext_class << ">*>(eHandle);\n";
-    os << "  auto* ext = extHandle ? extHandle->mp : nullptr;\n";
-  } else {
-    os << "  void* ext = nullptr;\n";
-  }
-  os << "  if (!ports) return;\n";
-  for (const auto& kv : workers) {
-    const auto& wp = kv.second;
-    if (wp.downlinks.empty()) continue;
-    os << "  {\n";
-    os << "    const uint32_t targetId = " << (kv.first + 1) << ";\n";
-    os << "    const uint8_t slotBits = " << wp.mbus_slot_bits << ";\n";
-    for (const auto& slot : wp.downlinks) {
-      os << "    {\n";
-      os << "      CorvusBusEndpoint* ep = mBusEndpoints[" << slot.bus_index << "];\n";
-      os << "      const uint8_t dataBits = " << slot.chunk.data_bits << ";\n";
-      os << "      const uint8_t chunkBits = " << slot.chunk.chunk_bits << ";\n";
-      os << "      const uint32_t chunkCount = " << slot.chunk.chunk_count << ";\n";
-      os << "      const uint32_t slotId = " << slot.slot_id << ";\n";
-      if (slot.sig.width_type == PortWidthType::VL_W) {
-        std::string src = slot.from_external ? (ext_class.empty() ? "nullptr" : ("ext ? reinterpret_cast<const uint32_t*>(&ext->" + slot.sig.name + ") : nullptr"))
-                                             : ("reinterpret_cast<const uint32_t*>(&ports->" + slot.sig.name + ")");
-        os << "      const uint32_t* widePtr = " << src << ";\n";
-        os << "      if (widePtr) {\n";
-        os << "        for (uint32_t chunkIdx = 0; chunkIdx < chunkCount; ++chunkIdx) {\n";
-        os << "          uint64_t chunkData = detail::read_wide_chunk(widePtr, " << slot.sig.array_size << ", dataBits, chunkIdx);\n";
-        os << "          uint64_t payload = detail::pack_payload(slotId, chunkData, chunkIdx, slotBits, dataBits, chunkBits);\n";
-        os << "          ep->send(targetId, payload);\n";
-        os << "        }\n";
-        os << "      }\n";
-      } else {
-        std::string base = slot.from_external ? (ext_class.empty() ? "0ULL" : ("(ext ? static_cast<uint64_t>(ext->" + slot.sig.name + ") : 0ULL)"))
-                                             : ("static_cast<uint64_t>(ports->" + slot.sig.name + ")");
-        os << "      uint64_t value = " << base << ";\n";
-        os << "      for (uint32_t chunkIdx = 0; chunkIdx < chunkCount; ++chunkIdx) {\n";
-        os << "        uint64_t chunkData = (value >> (chunkIdx * dataBits)) & detail::mask_bits(dataBits);\n";
-        os << "        uint64_t payload = detail::pack_payload(slotId, chunkData, chunkIdx, slotBits, dataBits, chunkBits);\n";
-        os << "        ep->send(targetId, payload);\n";
-        os << "      }\n";
-      }
-      os << "    }\n";
-    }
-    os << "  }\n";
-  }
+  os << "  // TODO: implement MBus downlink once protocol is finalized.\n";
   os << "}\n\n";
 
-  // loadOAndEInput
   os << "void " << top_class << "::loadOAndEInput() {\n";
-  os << "  auto* ports = static_cast<" << top_class << "::TopPortsGen*>(topPorts);\n";
-  if (!ext_class.empty()) {
-    os << "  auto* extHandle = static_cast<VerilatorModuleHandle<" << ext_class << ">*>(eHandle);\n";
-    os << "  auto* ext = extHandle ? extHandle->mp : nullptr;\n";
-  } else {
-    os << "  void* ext = nullptr;\n";
-  }
-  os << "  const uint8_t slotBits = " << top_slot_bits << ";\n";
-  std::vector<const TopSlot*> top_direct;
-  std::vector<const TopSlot*> top_decode;
-  for (const auto& slot : top_slots) {
-    if (slot.chunk.chunk_count == 1 && slot.sig.width_type != PortWidthType::VL_W) {
-      top_direct.push_back(&slot);
-    } else {
-      top_decode.push_back(&slot);
-    }
-  }
-  if (!top_decode.empty()) {
-    os << "  std::vector<detail::SlotDecoder> decoders;\n";
-    os << "  std::unordered_map<uint32_t, size_t> slotIndex;\n";
-    os << "  decoders.reserve(" << top_decode.size() << ");\n";
-    for (const auto* slot : top_decode) {
-      os << "  decoders.emplace_back(" << slot->slot_id << ", " << slot->slot_bits << ", "
-         << slot->chunk.data_bits << ", " << slot->chunk.chunk_bits << ", " << slot->chunk.chunk_count << ");\n";
-      os << "  slotIndex[" << slot->slot_id << "] = decoders.size() - 1;\n";
-    }
-  }
-  os << "  for (auto* ep : mBusEndpoints) {\n";
-  os << "    if (!ep) continue;\n";
-  os << "    while (ep->bufferCnt() > 0) {\n";
-  os << "      uint64_t payload = ep->recv();\n";
-  os << "      uint32_t slotId = static_cast<uint32_t>(payload & detail::mask_bits(slotBits));\n";
-  if (!top_direct.empty()) {
-    os << "      bool handled = false;\n";
-    os << "      switch (slotId) {\n";
-    for (const auto* slot : top_direct) {
-      std::string dest = slot->to_external
-        ? (ext_class.empty() ? "" : ("ext->" + slot->sig.name))
-        : ("ports->" + slot->sig.name);
-      os << "      case " << slot->slot_id << ": {\n";
-      os << "        uint64_t data = (payload >> slotBits) & detail::mask_bits(" << slot->sig.width << ");\n";
-      if (slot->to_external && ext_class.empty()) {
-        os << "        // External module not available in this build\n";
-      } else {
-        os << "        " << dest << " = static_cast<" << cpp_type_from_signal(slot->sig)
-           << ">(data);\n";
-      }
-      os << "        handled = true;\n";
-      os << "        break;\n";
-      os << "      }\n";
-    }
-    os << "      default: break;\n";
-    os << "      }\n";
-  }
-  if (!top_decode.empty()) {
-    if (!top_direct.empty()) {
-      os << "      if (handled) continue;\n";
-    }
-    os << "      auto it = slotIndex.find(slotId);\n";
-    os << "      if (it == slotIndex.end()) continue;\n";
-    os << "      decoders[it->second].consume(payload);\n";
-  }
-  os << "    }\n";
-  os << "  }\n";
-  if (!top_decode.empty()) {
-    os << "  for (size_t idx = 0; idx < decoders.size(); ++idx) {\n";
-    os << "    if (!decoders[idx].complete()) continue;\n";
-    os << "    switch (idx) {\n";
-    size_t slot_idx = 0;
-    for (const auto* slot : top_decode) {
-      std::string dest = slot->to_external
-        ? (ext_class.empty() ? "" : ("ext->" + slot->sig.name))
-        : ("ports->" + slot->sig.name);
-      os << "    case " << slot_idx << ": {\n";
-      if (slot->to_external && ext_class.empty()) {
-        os << "      // External module is not available; skip " << slot->sig.name << "\n";
-      } else if (slot->sig.width_type == PortWidthType::VL_W) {
-        os << "      detail::apply_to_wide(decoders[idx], reinterpret_cast<uint32_t*>(&" << dest << "), " << slot->sig.array_size << ");\n";
-      } else {
-        os << "      uint64_t value = detail::assemble_scalar(decoders[idx]);\n";
-        os << "      " << dest << " = static_cast<" << cpp_type_from_signal(slot->sig) << ">(value & detail::mask_bits(" << slot->sig.width << "));\n";
-      }
-      os << "      break;\n";
-      os << "    }\n";
-      ++slot_idx;
-    }
-    os << "    default: break;\n";
-    os << "    }\n";
-    os << "  }\n";
-  }
+  os << "  // TODO: implement MBus uplink once protocol is finalized.\n";
   os << "}\n\n";
 
   os << "} // namespace corvus_generated\n";
@@ -617,6 +485,9 @@ std::string generate_worker_cpp(const std::string& output_base,
   os << "namespace detail = corvus_helper;\n\n";
   (void)mbus_count;
   (void)sbus_count;
+  (void)top_slot_bits;
+  (void)send_to_top;
+  (void)remote_send_map;
 
   os << worker_class << "::" << worker_class << "(\n";
   os << "    CorvusSimWorkerSynctreeEndpoint* simWorkerSynctreeEndpoint,\n";
@@ -642,190 +513,12 @@ std::string generate_worker_cpp(const std::string& output_base,
 
   // loadRemoteCInputs
   os << "void " << worker_class << "::loadRemoteCInputs() {\n";
-  os << "  auto* combHandle = static_cast<VerilatorModuleHandle<" << wp.comb->class_name << ">* >(cModule);\n";
-  os << "  auto* comb = combHandle ? combHandle->mp : nullptr;\n";
-  os << "  if (!comb) return;\n";
-  if (!wp.downlinks.empty()) {
-    os << "  {\n";
-    os << "    const uint8_t slotBits = " << wp.mbus_slot_bits << ";\n";
-    std::vector<const DownlinkSlot*> direct_slots;
-    std::vector<const DownlinkSlot*> decode_slots;
-    for (const auto& slot : wp.downlinks) {
-      if (slot.chunk.chunk_count == 1 && slot.sig.width_type != PortWidthType::VL_W) {
-        direct_slots.push_back(&slot);
-      } else {
-        decode_slots.push_back(&slot);
-      }
-    }
-    if (!decode_slots.empty()) {
-      os << "    std::vector<detail::SlotDecoder> decoders;\n";
-      os << "    std::unordered_map<uint32_t, size_t> slotIndex;\n";
-      os << "    decoders.reserve(" << decode_slots.size() << ");\n";
-      for (const auto* slot : decode_slots) {
-        os << "    decoders.emplace_back(" << slot->slot_id << ", " << slot->slot_bits << ", "
-           << slot->chunk.data_bits << ", " << slot->chunk.chunk_bits << ", " << slot->chunk.chunk_count << ");\n";
-        os << "    slotIndex[" << slot->slot_id << "] = decoders.size() - 1;\n";
-      }
-    }
-    os << "    for (auto* ep : mBusEndpoints) {\n";
-    os << "      if (!ep) continue;\n";
-    os << "      while (ep->bufferCnt() > 0) {\n";
-    os << "        uint64_t payload = ep->recv();\n";
-    os << "        uint32_t slotId = static_cast<uint32_t>(payload & corvus_helper::mask_bits(slotBits));\n";
-    if (!direct_slots.empty()) {
-      os << "        bool handled = false;\n";
-      os << "        switch (slotId) {\n";
-      for (const auto* slot : direct_slots) {
-        os << "        case " << slot->slot_id << ": {\n";
-        os << "          uint64_t data = (payload >> slotBits) & corvus_helper::mask_bits(" << slot->sig.width << ");\n";
-        os << "          comb->" << slot->sig.name << " = static_cast<" << cpp_type_from_signal(slot->sig) << ">(data);\n";
-        os << "          handled = true;\n";
-        os << "          break;\n";
-        os << "        }\n";
-      }
-      os << "        default: break;\n";
-      os << "        }\n";
-    }
-    if (!decode_slots.empty()) {
-      if (!direct_slots.empty()) {
-        os << "        if (handled) continue;\n";
-      }
-      os << "        auto it = slotIndex.find(slotId);\n";
-      os << "        if (it == slotIndex.end()) continue;\n";
-      os << "        decoders[it->second].consume(payload);\n";
-    }
-    os << "      }\n";
-    os << "    }\n";
-    if (!decode_slots.empty()) {
-      os << "    for (size_t idx = 0; idx < decoders.size(); ++idx) {\n";
-      os << "      if (!decoders[idx].complete()) continue;\n";
-      os << "      switch (idx) {\n";
-      for (size_t decIdx = 0; decIdx < decode_slots.size(); ++decIdx) {
-        const auto* slot = decode_slots[decIdx];
-        os << "      case " << decIdx << ": {\n";
-        if (slot->sig.width_type == PortWidthType::VL_W) {
-          os << "        corvus_helper::apply_to_wide(decoders[idx], reinterpret_cast<uint32_t*>(&comb->" << slot->sig.name << "), " << slot->sig.array_size << ");\n";
-        } else {
-          os << "        uint64_t value = corvus_helper::assemble_scalar(decoders[idx]);\n";
-          os << "        comb->" << slot->sig.name << " = static_cast<" << cpp_type_from_signal(slot->sig) << ">(value & corvus_helper::mask_bits(" << slot->sig.width << "));\n";
-        }
-        os << "        break;\n";
-        os << "      }\n";
-      }
-      os << "      default: break;\n";
-      os << "      }\n";
-      os << "    }\n";
-    }
-    os << "  }\n";
-  }
-  if (!wp.remote_recv.empty()) {
-    os << "  {\n";
-    os << "    const uint8_t slotBits = " << wp.remote_slot_bits << ";\n";
-    std::vector<const RemoteRecvSlot*> direct_slots;
-    std::vector<const RemoteRecvSlot*> decode_slots;
-    for (const auto& slot : wp.remote_recv) {
-      if (slot.chunk.chunk_count == 1 && slot.sig.width_type != PortWidthType::VL_W) {
-        direct_slots.push_back(&slot);
-      } else {
-        decode_slots.push_back(&slot);
-      }
-    }
-    if (!decode_slots.empty()) {
-      os << "    std::vector<detail::SlotDecoder> decoders;\n";
-      os << "    std::unordered_map<uint32_t, size_t> slotIndex;\n";
-      os << "    decoders.reserve(" << decode_slots.size() << ");\n";
-      for (const auto* slot : decode_slots) {
-        os << "    decoders.emplace_back(" << slot->slot_id << ", " << slot->slot_bits << ", "
-           << slot->chunk.data_bits << ", " << slot->chunk.chunk_bits << ", " << slot->chunk.chunk_count << ");\n";
-        os << "    slotIndex[" << slot->slot_id << "] = decoders.size() - 1;\n";
-      }
-    }
-    os << "    for (auto* ep : this->sBusEndpoints) {\n";
-    os << "      if (!ep) continue;\n";
-    os << "      while (ep->bufferCnt() > 0) {\n";
-    os << "        uint64_t payload = ep->recv();\n";
-    os << "        uint32_t slotId = static_cast<uint32_t>(payload & detail::mask_bits(slotBits));\n";
-    if (!direct_slots.empty()) {
-      os << "        bool handled = false;\n";
-      os << "        switch (slotId) {\n";
-      for (const auto* slot : direct_slots) {
-        os << "        case " << slot->slot_id << ": {\n";
-        os << "          uint64_t data = (payload >> slotBits) & detail::mask_bits(" << slot->sig.width << ");\n";
-        os << "          comb->" << slot->sig.name << " = static_cast<" << cpp_type_from_signal(slot->sig) << ">(data);\n";
-        os << "          handled = true;\n";
-        os << "          break;\n";
-        os << "        }\n";
-      }
-      os << "        default: break;\n";
-      os << "        }\n";
-    }
-    if (!decode_slots.empty()) {
-      if (!direct_slots.empty()) {
-        os << "        if (handled) continue;\n";
-      }
-      os << "        auto it = slotIndex.find(slotId);\n";
-      os << "        if (it == slotIndex.end()) continue;\n";
-      os << "        decoders[it->second].consume(payload);\n";
-    }
-    os << "      }\n";
-    os << "    }\n";
-    if (!decode_slots.empty()) {
-      os << "    for (size_t idx = 0; idx < decoders.size(); ++idx) {\n";
-      os << "      if (!decoders[idx].complete()) continue;\n";
-      os << "      switch (idx) {\n";
-      for (size_t decIdx = 0; decIdx < decode_slots.size(); ++decIdx) {
-        const auto* slot = decode_slots[decIdx];
-        os << "      case " << decIdx << ": {\n";
-        if (slot->sig.width_type == PortWidthType::VL_W) {
-          os << "        detail::apply_to_wide(decoders[idx], reinterpret_cast<uint32_t*>(&comb->" << slot->sig.name << "), " << slot->sig.array_size << ");\n";
-        } else {
-          os << "        uint64_t value = detail::assemble_scalar(decoders[idx]);\n";
-          os << "        comb->" << slot->sig.name << " = static_cast<" << cpp_type_from_signal(slot->sig) << ">(value & detail::mask_bits(" << slot->sig.width << "));\n";
-        }
-        os << "        break;\n";
-        os << "      }\n";
-      }
-      os << "      default: break;\n";
-      os << "      }\n";
-      os << "    }\n";
-    }
-    os << "  }\n";
-  }
+  os << "  // TODO: MBus receive path disabled during refactor.\n";
   os << "}\n\n";
 
   // sendRemoteCOutputs
   os << "void " << worker_class << "::sendRemoteCOutputs() {\n";
-  os << "  auto* combHandle = static_cast<VerilatorModuleHandle<" << wp.comb->class_name << ">* >(cModule);\n";
-  os << "  auto* comb = combHandle ? combHandle->mp : nullptr;\n";
-  os << "  if (!comb) return;\n";
-  auto top_it = send_to_top.find(wp.pid);
-  if (top_it != send_to_top.end() && !top_it->second.empty()) {
-    os << "  const uint8_t slotBits = " << top_slot_bits << ";\n";
-    for (const auto* slot : top_it->second) {
-      os << "  {\n";
-      os << "    CorvusBusEndpoint* ep = mBusEndpoints[" << slot->bus_index << "];\n";
-      os << "    const uint32_t slotId = " << slot->slot_id << ";\n";
-      os << "    const uint8_t dataBits = " << slot->chunk.data_bits << ";\n";
-      os << "    const uint8_t chunkBits = " << slot->chunk.chunk_bits << ";\n";
-      os << "    const uint32_t chunkCount = " << slot->chunk.chunk_count << ";\n";
-      if (slot->sig.width_type == PortWidthType::VL_W) {
-        os << "    const uint32_t* widePtr = reinterpret_cast<const uint32_t*>(&comb->" << slot->sig.name << ");\n";
-        os << "    for (uint32_t chunkIdx = 0; chunkIdx < chunkCount; ++chunkIdx) {\n";
-        os << "      uint64_t chunkData = detail::read_wide_chunk(widePtr, " << slot->sig.array_size << ", dataBits, chunkIdx);\n";
-        os << "      uint64_t payload = detail::pack_payload(slotId, chunkData, chunkIdx, slotBits, dataBits, chunkBits);\n";
-        os << "      ep->send(0, payload);\n";
-        os << "    }\n";
-      } else {
-        os << "    uint64_t value = static_cast<uint64_t>(comb->" << slot->sig.name << ");\n";
-        os << "    for (uint32_t chunkIdx = 0; chunkIdx < chunkCount; ++chunkIdx) {\n";
-        os << "      uint64_t chunkData = (value >> (chunkIdx * dataBits)) & detail::mask_bits(dataBits);\n";
-        os << "      uint64_t payload = detail::pack_payload(slotId, chunkData, chunkIdx, slotBits, dataBits, chunkBits);\n";
-        os << "      ep->send(0, payload);\n";
-        os << "    }\n";
-      }
-      os << "  }\n";
-    }
-  }
+  os << "  // TODO: MBus send path disabled during refactor.\n";
   os << "}\n\n";
 
   // loadSInputs (local C->S)
@@ -850,38 +543,7 @@ std::string generate_worker_cpp(const std::string& output_base,
 
   // sendRemoteSOutputs
   os << "void " << worker_class << "::sendRemoteSOutputs() {\n";
-  os << "  auto* seqHandle = static_cast<VerilatorModuleHandle<" << wp.seq->class_name << ">* >(sModule);\n";
-  os << "  auto* seq = seqHandle ? seqHandle->mp : nullptr;\n";
-  os << "  if (!seq) return;\n";
-  auto remote_it = remote_send_map.find(wp.pid);
-  if (remote_it != remote_send_map.end()) {
-    for (const auto* slot : remote_it->second) {
-      os << "  {\n";
-      os << "    CorvusBusEndpoint* ep = this->sBusEndpoints[" << slot->bus_index << "];\n";
-      os << "    const uint8_t slotBits = " << slot->slot_bits << ";\n";
-      os << "    const uint32_t slotId = " << slot->slot_id << ";\n";
-      os << "    const uint8_t dataBits = " << slot->chunk.data_bits << ";\n";
-      os << "    const uint8_t chunkBits = " << slot->chunk.chunk_bits << ";\n";
-      os << "    const uint32_t chunkCount = " << slot->chunk.chunk_count << ";\n";
-      os << "    const uint32_t targetId = " << (slot->sig.receiver_pid + 1) << ";\n";
-      if (slot->sig.width_type == PortWidthType::VL_W) {
-        os << "    const uint32_t* widePtr = reinterpret_cast<const uint32_t*>(&seq->" << slot->sig.name << ");\n";
-        os << "    for (uint32_t chunkIdx = 0; chunkIdx < chunkCount; ++chunkIdx) {\n";
-        os << "      uint64_t chunkData = detail::read_wide_chunk(widePtr, " << slot->sig.array_size << ", dataBits, chunkIdx);\n";
-        os << "      uint64_t payload = detail::pack_payload(slotId, chunkData, chunkIdx, slotBits, dataBits, chunkBits);\n";
-        os << "      ep->send(targetId, payload);\n";
-        os << "    }\n";
-      } else {
-        os << "    uint64_t value = static_cast<uint64_t>(seq->" << slot->sig.name << ");\n";
-        os << "    for (uint32_t chunkIdx = 0; chunkIdx < chunkCount; ++chunkIdx) {\n";
-        os << "      uint64_t chunkData = (value >> (chunkIdx * dataBits)) & detail::mask_bits(dataBits);\n";
-        os << "      uint64_t payload = detail::pack_payload(slotId, chunkData, chunkIdx, slotBits, dataBits, chunkBits);\n";
-        os << "      ep->send(targetId, payload);\n";
-        os << "    }\n";
-      }
-      os << "  }\n";
-    }
-  }
+  os << "  // TODO: SBus send path disabled during refactor.\n";
   os << "}\n\n";
 
   // loadLocalCInputs (S -> C feedback)

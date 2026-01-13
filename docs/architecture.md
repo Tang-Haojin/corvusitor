@@ -22,7 +22,7 @@
 
 ### 分类规则概要
 1. 按端口名聚合并比对位宽，得到原始 `PortConnection`（支持多 driver/receiver）。
-2. 仅为“将要接收”的信号建立 slot，未被消费的 driver 不膨胀计数。
+2. 仅统计“将要接收”的信号，未被消费的 driver 不膨胀计数。
 3. 按 receiver 拆分分类：
    - 无 driver → `top_inputs`
    - 无 receiver → `top_outputs`
@@ -30,13 +30,10 @@
    - SEQ driver：COMB 同分区 → `local_s_to_c`；COMB 跨分区 → `remote_s_to_c`；其他类型告警
    - EXTERNAL driver：COMB → `external_outputs`；其他类型告警
 
-## 总线与 slot 模型
+## 总线模型
 - MBus：Top↔Worker。Top 下发 I/Eo，Worker 上送 O/Ei，`targetId`=0 表示 Top，1..N 表示各分区。
 - SBus：Worker↔Worker。仅承载 `remote_s_to_c`（S→C 跨分区）。
 - 本地直连：同分区的 Ct→Si / St→Ci 直接内存拷贝，不经总线。
-- Slot 分配：按接收端独立规划 slot 空间，slotBits 取 {8,16,32} 中满足 slot 数的最小值（ceil(log2(slotCount)) 后向上取整）。
-- Chunk 规划：48-bit payload 预算下优先选择 dataBits=32/16/8；若宽度超出则启用 chunkBits=8/16/32 分片，`chunkCount`=ceil(width/dataBits)，必要时提升 chunkBits 直至覆盖。
-- 编码布局：`chunkIdx | data | slotId`，slotId 永远在最低位；未分片的信号 chunkBits=0、chunkIdx 视作 0。
 - 辅助库：`boilerplate/corvus/corvus_helper.h` 提供位掩码、payload 打包/解包，以及 VlWide 的跨 word 读写。
 
 ## 生成代码结构

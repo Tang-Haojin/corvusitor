@@ -2,6 +2,7 @@
 #include <iostream>
 #include <set>
 #include <climits>
+#include <stdexcept>
 
 std::vector<PortConnection> ConnectionBuilder::build(const std::vector<ModuleInfo>& modules) {
   std::vector<PortConnection> connections;
@@ -22,12 +23,10 @@ std::vector<PortConnection> ConnectionBuilder::build(const std::vector<ModuleInf
   for (const auto& pair : port_groups) {
     const PortGroup& group = pair.second;
 
-  // Validate connection legality
+    // Validate connection legality
     std::string error_msg;
     if (!validate_connection(group, error_msg)) {
-      std::cerr << "Warning: Invalid connection for port '"
-                << group.port_name << "': " << error_msg << std::endl;
-      continue;
+      throw std::runtime_error("Constraint violation on port '" + group.port_name + "': " + error_msg);
     }
 
   // Check if there is a driver
@@ -41,17 +40,12 @@ std::vector<PortConnection> ConnectionBuilder::build(const std::vector<ModuleInf
   // Handle top-level input (no driver)
     if (!has_driver) {
       // Check if all receiver modules are COMB
-      bool has_non_comb_receiver = false;
       for (const auto* recv_module : group.receiver_modules) {
         if (recv_module->type != ModuleType::COMB) {
-          has_non_comb_receiver = true;
-          std::cerr << "Warning: Top-level input port '" << group.port_name
-               << "' connected to non-COMB module '" << recv_module->instance_name
-               << "' (type: " << recv_module->get_type_str() << ")" << std::endl;
+          throw std::runtime_error(
+            "Constraint violation on port '" + group.port_name +
+            "': top-level input targets non-COMB module '" + recv_module->instance_name + "'");
         }
-      }
-      if (has_non_comb_receiver) {
-        continue;
       }
 
       // Create top-level input connection
@@ -353,8 +347,8 @@ ConnectionAnalysis ConnectionBuilder::analyze(const std::vector<ModuleInfo>& mod
     }
   }
 
-  auto warn = [&](const std::string& msg) {
-    analysis.warnings.push_back(msg);
+  auto fail = [&](const std::string& msg) {
+    throw std::runtime_error("Constraint violation: " + msg);
   };
 
   for (const auto& conn : connections) {
@@ -370,8 +364,7 @@ ConnectionAnalysis ConnectionBuilder::analyze(const std::vector<ModuleInfo>& mod
       continue;
     }
     if (!conn.driver_module) {
-      warn("Connection without driver: " + conn.port_name);
-      continue;
+      fail("Connection without driver: " + conn.port_name);
     }
 
     auto driver_type = conn.driver_module->type;
@@ -387,26 +380,23 @@ ConnectionAnalysis ConnectionBuilder::analyze(const std::vector<ModuleInfo>& mod
       single.receivers.push_back(recv_ep);
 
       if (!recv) {
-        warn("Null receiver in connection: " + conn.port_name);
-        continue;
+        fail("Null receiver in connection: " + conn.port_name);
       }
 
       if (driver_type == ModuleType::COMB) {
         if (recv->type == ModuleType::SEQ) {
           if (recv->partition_id != driver_pid) {
-            warn("Illegal COMB->SEQ across partitions for port '" + conn.port_name + "'");
-            continue;
+            fail("Illegal COMB->SEQ across partitions for port '" + conn.port_name + "'");
           }
           analysis.partitions[driver_pid].local_c_to_s.push_back(single);
         } else if (recv->type == ModuleType::EXTERNAL) {
           analysis.external_inputs.push_back(single); // comb -> external (Ei)
         } else {
-          warn("Unsupported COMB receiver type for port '" + conn.port_name + "'");
+          fail("Unsupported COMB receiver type for port '" + conn.port_name + "'");
         }
       } else if (driver_type == ModuleType::SEQ) {
         if (recv->type != ModuleType::COMB) {
-          warn("SEQ driver port '" + conn.port_name + "' targets non-COMB receiver");
-          continue;
+          fail("SEQ driver port '" + conn.port_name + "' targets non-COMB receiver");
         }
         if (recv->partition_id == driver_pid) {
           analysis.partitions[driver_pid].local_s_to_c.push_back(single);
@@ -417,10 +407,10 @@ ConnectionAnalysis ConnectionBuilder::analyze(const std::vector<ModuleInfo>& mod
         if (recv->type == ModuleType::COMB) {
           analysis.external_outputs.push_back(single); // external -> comb (Eo)
         } else {
-          warn("EXTERNAL driver port '" + conn.port_name + "' targets non-COMB receiver");
+          fail("EXTERNAL driver port '" + conn.port_name + "' targets non-COMB receiver");
         }
       } else {
-        warn("Unknown driver type for port '" + conn.port_name + "'");
+        fail("Unknown driver type for port '" + conn.port_name + "'");
       }
     }
   }

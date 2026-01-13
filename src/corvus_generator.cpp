@@ -365,7 +365,7 @@ std::string generate_top_cpp(const std::string& output_base,
   if (external_mod) module_headers.insert(external_mod->header_path);
   (void)mbus_count;
   (void)sbus_count;
-  (void)workers;
+  (void)top_slot_bits;
 
   std::ostringstream os;
   os << "#include \"" << path_basename(top_header_name) << "\"\n";
@@ -404,9 +404,67 @@ std::string generate_top_cpp(const std::string& output_base,
     os << "void " << top_class << "::deleteExternalModule() { eModule = nullptr; }\n";
   }
 
-  // MBus communication temporarily disabled; TODO: reintroduce once sync strategy settles
   os << "void " << top_class << "::sendIAndEOutput() {\n";
-  os << "  // TODO: implement MBus downlink once protocol is finalized.\n";
+  os << "  auto* ports = static_cast<" << top_class << "::TopPortsGen*>(topPorts);\n";
+  os << "  (void)ports;\n";
+  bool has_downlinks = false;
+  for (const auto& kv : workers) {
+    if (!kv.second.downlinks.empty()) { has_downlinks = true; break; }
+  }
+  if (has_downlinks) {
+    if (external_mod) {
+      os << "  auto* eHandle = static_cast<VerilatorModuleHandle<" << ext_class << ">*>(eModule);\n";
+      os << "  auto* ext = eHandle ? eHandle->mp : nullptr;\n";
+      os << "  (void)ext;\n";
+    } else {
+      os << "  (void)eModule;\n";
+    }
+    os << "  uint64_t payload = 0;\n";
+    os << "  uint64_t slice_data = 0;\n";
+    for (const auto& kv : workers) {
+      const auto& wp = kv.second;
+      if (wp.downlinks.empty()) continue;
+      os << "  {\n";
+      os << "    const uint32_t targetId = " << (wp.pid + 1) << ";\n";
+      for (const auto& slot : wp.downlinks) {
+        const auto& sig = slot.sig;
+        const std::string data_mask_hex = "0xFFFFULL";
+        const std::string src_expr = slot.from_external
+          ? (std::string("ext->") + (sig.driver.port ? sig.driver.port->name : sig.name))
+          : (std::string("ports->") + sig.name);
+        os << "    {\n";
+        os << "      // slot " << sig.name << " (base slotId=" << slot.slot_id << ")\n";
+        if (sig.width_type == PortWidthType::VL_W) {
+          for (const auto& slice : slot.slices) {
+            os << "      {\n";
+            os << "        int bitOffset = " << slice.bit_offset << ";\n";
+            os << "        int word = bitOffset / 32;\n";
+            os << "        int wordBit = bitOffset % 32;\n";
+            os << "        slice_data = static_cast<uint64_t>(" << src_expr << "[word]);\n";
+            os << "        slice_data >>= wordBit;\n";
+            os << "        slice_data &= " << data_mask_hex << ";\n";
+            os << "        payload = static_cast<uint64_t>(" << slice.slot_id << ");\n";
+            os << "        payload |= (slice_data << 32);\n";
+            os << "        mBusEndpoints[" << slot.bus_index << "]->send(targetId, payload);\n";
+            os << "      }\n";
+          }
+        } else {
+          os << "      uint64_t src_val = static_cast<uint64_t>(" << src_expr << ");\n";
+          for (const auto& slice : slot.slices) {
+            os << "      {\n";
+            os << "        int bitOffset = " << slice.bit_offset << ";\n";
+            os << "        slice_data = (src_val >> bitOffset) & " << data_mask_hex << ";\n";
+            os << "        payload = static_cast<uint64_t>(" << slice.slot_id << ");\n";
+            os << "        payload |= (slice_data << 32);\n";
+            os << "        mBusEndpoints[" << slot.bus_index << "]->send(targetId, payload);\n";
+            os << "      }\n";
+          }
+        }
+        os << "    }\n";
+      }
+      os << "  }\n";
+    }
+  }
   os << "}\n\n";
 
   os << "void " << top_class << "::loadOAndEInput() {\n";
@@ -446,6 +504,10 @@ std::string generate_top_cpp(const std::string& output_base,
           os << "          uint32_t lowMask = static_cast<uint32_t>(" << data_mask_hex << " << wordBit);\n";
           os << "          uint32_t lowBits = static_cast<uint32_t>(data << wordBit);\n";
           os << "          " << dst_expr << "[word] = (" << dst_expr << "[word] & ~lowMask) | lowBits;\n";
+          os << "        }\n";
+        } else if (sig.width <= 16) {
+          os << "        if (" << dst_guard << ") {\n";
+          os << "          " << dst_expr << " = static_cast<" << cpp_type_from_signal(sig) << ">(data);\n";
           os << "        }\n";
         } else {
           os << "        uint64_t cur = static_cast<uint64_t>(" << dst_expr << ");\n";
@@ -524,7 +586,6 @@ std::string generate_worker_cpp(const std::string& output_base,
   (void)mbus_count;
   (void)sbus_count;
   (void)top_slot_bits;
-  (void)remote_send_map;
 
   os << worker_class << "::" << worker_class << "(\n";
   os << "    CorvusSimWorkerSynctreeEndpoint* simWorkerSynctreeEndpoint,\n";
@@ -550,7 +611,93 @@ std::string generate_worker_cpp(const std::string& output_base,
 
   // loadRemoteCInputs
   os << "void " << worker_class << "::loadRemoteCInputs() {\n";
-  os << "  // TODO: MBus receive path disabled during refactor.\n";
+  os << "  auto* combHandle = static_cast<VerilatorModuleHandle<" << wp.comb->class_name << ">* >(cModule);\n";
+  os << "  auto* comb = combHandle ? combHandle->mp : nullptr;\n";
+  os << "  if (!comb) return;\n";
+  os << "  const uint64_t kSlotMask = 0xFFFFFFFFULL;\n";
+  bool has_downlink_slots = !wp.downlinks.empty();
+  bool has_remote_slots = !wp.remote_recv.empty();
+  if (!has_downlink_slots && !has_remote_slots) {
+    os << "  (void)kSlotMask;\n";
+  }
+  if (has_downlink_slots) {
+    os << "  for (size_t ep = 0; ep < mBusEndpoints.size(); ++ep) {\n";
+    os << "    int cnt = mBusEndpoints[ep]->bufferCnt();\n";
+    os << "    for (int i = 0; i < cnt; ++i) {\n";
+    os << "      uint64_t payload = mBusEndpoints[ep]->recv();\n";
+    os << "      uint32_t slotId = static_cast<uint32_t>(payload & kSlotMask);\n";
+    os << "      switch (slotId) {\n";
+    for (const auto& slot : wp.downlinks) {
+      const auto& sig = slot.sig;
+      const std::string data_mask_hex = "0xFFFFULL";
+      const std::string dst_expr = std::string("comb->") + (sig.receiver.port ? sig.receiver.port->name : sig.name);
+      for (const auto& slice : slot.slices) {
+        os << "      case " << slice.slot_id << ": {\n";
+        os << "        uint64_t data = (payload >> 32) & " << data_mask_hex << ";\n";
+        os << "        int bitOffset = " << slice.bit_offset << ";\n";
+        if (sig.width_type == PortWidthType::VL_W) {
+          os << "        int word = bitOffset / 32;\n";
+          os << "        int wordBit = bitOffset % 32;\n";
+          os << "        uint32_t lowMask = static_cast<uint32_t>(" << data_mask_hex << " << wordBit);\n";
+          os << "        uint32_t lowBits = static_cast<uint32_t>(data << wordBit);\n";
+          os << "        " << dst_expr << "[word] = (" << dst_expr << "[word] & ~lowMask) | lowBits;\n";
+        } else if (sig.width <= 16) {
+          os << "        " << dst_expr << " = static_cast<" << cpp_type_from_signal(sig) << ">(data);\n";
+        } else {
+          os << "        uint64_t cur = static_cast<uint64_t>(" << dst_expr << ");\n";
+          os << "        uint64_t mask = (" << data_mask_hex << ") << bitOffset;\n";
+          os << "        cur = (cur & ~mask) | ((data & " << data_mask_hex << ") << bitOffset);\n";
+          os << "        " << dst_expr << " = static_cast<" << cpp_type_from_signal(sig) << ">(cur);\n";
+        }
+        os << "        break;\n";
+        os << "      }\n";
+      }
+    }
+    os << "      default: break;\n";
+    os << "      }\n";
+    os << "    }\n";
+    os << "  }\n";
+  }
+
+  if (has_remote_slots) {
+    os << "  for (size_t ep = 0; ep < sBusEndpoints.size(); ++ep) {\n";
+    os << "    int cnt = sBusEndpoints[ep]->bufferCnt();\n";
+    os << "    for (int i = 0; i < cnt; ++i) {\n";
+    os << "      uint64_t payload = sBusEndpoints[ep]->recv();\n";
+    os << "      uint32_t slotId = static_cast<uint32_t>(payload & kSlotMask);\n";
+    os << "      switch (slotId) {\n";
+    for (const auto& slot : wp.remote_recv) {
+      const auto& sig = slot.sig;
+      const std::string data_mask_hex = "0xFFFFULL";
+      const std::string dst_expr = std::string("comb->") + (sig.receiver.port ? sig.receiver.port->name : sig.name);
+      for (const auto& slice : slot.slices) {
+        os << "      case " << slice.slot_id << ": {\n";
+        os << "        uint64_t data = (payload >> 32) & " << data_mask_hex << ";\n";
+        os << "        int bitOffset = " << slice.bit_offset << ";\n";
+        if (sig.width_type == PortWidthType::VL_W) {
+          os << "        int word = bitOffset / 32;\n";
+          os << "        int wordBit = bitOffset % 32;\n";
+          os << "        uint32_t lowMask = static_cast<uint32_t>(" << data_mask_hex << " << wordBit);\n";
+          os << "        uint32_t lowBits = static_cast<uint32_t>(data << wordBit);\n";
+          os << "        " << dst_expr << "[word] = (" << dst_expr << "[word] & ~lowMask) | lowBits;\n";
+        } else if (sig.width <= 16) {
+          os << "        " << dst_expr << " = static_cast<" << cpp_type_from_signal(sig) << ">(data);\n";
+        } else {
+          os << "        uint64_t cur = static_cast<uint64_t>(" << dst_expr << ");\n";
+          os << "        uint64_t mask = (" << data_mask_hex << ") << bitOffset;\n";
+          os << "        cur = (cur & ~mask) | ((data & " << data_mask_hex << ") << bitOffset);\n";
+          os << "        " << dst_expr << " = static_cast<" << cpp_type_from_signal(sig) << ">(cur);\n";
+        }
+        os << "        break;\n";
+        os << "      }\n";
+      }
+    }
+    os << "      default: break;\n";
+    os << "      }\n";
+    os << "    }\n";
+    os << "  }\n";
+  }
+
   os << "}\n\n";
 
   // sendRemoteCOutputs
@@ -627,8 +774,53 @@ std::string generate_worker_cpp(const std::string& output_base,
 
   // sendRemoteSOutputs
   os << "void " << worker_class << "::sendRemoteSOutputs() {\n";
-  os << "  // TODO: SBus send path disabled during refactor.\n";
-  os << "}\n\n";
+  os << "  auto* seqHandle = static_cast<VerilatorModuleHandle<" << wp.seq->class_name << ">* >(sModule);\n";
+  os << "  auto* seq = seqHandle ? seqHandle->mp : nullptr;\n";
+  os << "  if (!seq) return;\n";
+  os << "  uint64_t payload = 0;\n";
+  os << "  uint64_t slice_data = 0;\n";
+  auto remote_it = remote_send_map.find(wp.pid);
+  if (remote_it == remote_send_map.end() || remote_it->second.empty()) {
+    os << "  (void)payload; (void)slice_data;\n";
+    os << "}\n\n";
+  } else {
+    for (const auto* slot : remote_it->second) {
+      const auto& sig = slot->sig;
+      std::string src = "seq->" + (sig.driver.port ? sig.driver.port->name : sig.name);
+      const std::string data_mask_hex = "0xFFFFULL";
+      os << "  {\n";
+      os << "    // slot " << sig.name << " -> P" << sig.receiver_pid << " (base slotId=" << slot->slot_id << ")\n";
+      os << "    const uint32_t targetId = " << (sig.receiver_pid + 1) << ";\n";
+      if (sig.width_type == PortWidthType::VL_W) {
+        for (const auto& slice : slot->slices) {
+          os << "    {\n";
+          os << "      int bitOffset = " << slice.bit_offset << ";\n";
+          os << "      int word = bitOffset / 32;\n";
+          os << "      int wordBit = bitOffset % 32;\n";
+          os << "      slice_data = static_cast<uint64_t>(" << src << "[word]);\n";
+          os << "      slice_data >>= wordBit;\n";
+          os << "      slice_data &= " << data_mask_hex << ";\n";
+          os << "      payload = static_cast<uint64_t>(" << slice.slot_id << ");\n";
+          os << "      payload |= (slice_data << 32);\n";
+          os << "      sBusEndpoints[" << slot->bus_index << "]->send(targetId, payload);\n";
+          os << "    }\n";
+        }
+      } else {
+        os << "    uint64_t src_val = static_cast<uint64_t>(" << src << ");\n";
+        for (const auto& slice : slot->slices) {
+          os << "    {\n";
+          os << "      int bitOffset = " << slice.bit_offset << ";\n";
+          os << "      slice_data = (src_val >> bitOffset) & " << data_mask_hex << ";\n";
+          os << "      payload = static_cast<uint64_t>(" << slice.slot_id << ");\n";
+          os << "      payload |= (slice_data << 32);\n";
+          os << "      sBusEndpoints[" << slot->bus_index << "]->send(targetId, payload);\n";
+          os << "    }\n";
+        }
+      }
+      os << "  }\n";
+    }
+    os << "}\n\n";
+  }
 
   // loadLocalCInputs (S -> C feedback)
   os << "void " << worker_class << "::loadLocalCInputs() {\n";

@@ -1,7 +1,8 @@
 # Corvusitor 工作流
 
 ## 前置条件
-- 已生成的 Verilator 仿真模块（当前仅实现 Verilator，其余仿真器支持尚未实现）：`corvus_comb_P*`、`corvus_seq_P*`、可选 `corvus_external`，端口名称/位宽满足 corvus 约束（见 `docs/architecture.md#输入约束来自仿真输出`）。
+- 已生成的 Verilator 仿真模块（当前仅实现 Verilator，其余仿真器支持尚未实现；目录中出现 VCS/Modelsim 等未支持产物会报错退出）：`corvus_comb_P*`、`corvus_seq_P*`、可选 `corvus_external`，端口名称/位宽满足 corvus 约束（见 `docs/architecture.md#输入约束来自仿真输出`）。
+- 约束违规（多 driver、位宽不一致、非法跨分区或 external 连接等）会在解析/分类阶段直接报错终止，不再以 warning 继续。
 - 可选：配置 `MBUS_COUNT` / `SBUS_COUNT`（编译期总线端点数）。
 
 ## 使用步骤

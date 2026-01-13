@@ -37,7 +37,7 @@ void CorvusSimWorker::loop() {
         logStage("waiting for top sync");
         while(loopContinue && !isTopSyncFlagRaised()) {
             // yield to allow stop requests to be observed promptly
-            std::this_thread::yield();
+            // std::this_thread::yield();
         }
         if (!loopContinue) break;
         logStage(std::string("get top sync flag as ") + std::to_string(prevTopSyncFlag.getValue()));

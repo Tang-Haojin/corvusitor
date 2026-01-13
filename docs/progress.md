@@ -3,6 +3,7 @@
 - 生成链路：`CodeGenerator` 支持传入 `mbus_count`/`sbus_count`，并持久化模块列表供 `ConnectionBuilder` 使用；CLI 已新增 `--target` 选择 corvus/cmodel。
 - 工件输出：`CorvusGenerator` 产出 JSON + 头文件（`C<output>TopModuleGen`/`C<output>SimWorkerGenP*`/`C<output>CorvusGen.h`，类名驼峰且含 output 前缀），MBus/SBus 端点数使用运行期 `assert` 校验。`CorvusCModelGenerator` 已落地，生成 `C<output>CModelGen.h` 并包装 top/worker 入口。
 - 路由策略：以接收端需求驱动的路由规划，远端 S→C 路由按 targetId=分区+1。
+- 约束校验：连接发现/分类时遇到多 driver、位宽不匹配、非法跨分区或 external 连接会直接抛错终止（不再仅打印 warning）。
 - 测试覆盖：`test_corvus_generator`（JSON/头文件烟测）、`test_corvus_slots`（跨分区 S→C）、`test_corvus_yuquan`（YuQuan 集成路径，需先生成 verilator 工件）、`test_corvus_yuquan_cmodel`（YuQuan CModel 集成）。
 
 来自旧文档的补充
@@ -46,4 +47,3 @@
 		2. 在多条 sBusEndpoints 间简单轮询发送，分散负载。
 	- `SimWorker::loadLocalCInputs()`：
 		1. 依据硬编码映射执行 Si→Ci 内存拷贝（不经总线），宽信号按片拷贝。
-

@@ -302,7 +302,6 @@ void write_includes(std::ostream& os, const std::set<std::string>& module_header
   os << "#include \"boilerplate/common/top_ports.h\"\n";
   os << "#include \"boilerplate/corvus/corvus_top_module.h\"\n";
   os << "#include \"boilerplate/corvus/corvus_sim_worker.h\"\n";
-  os << "#include \"boilerplate/corvus/corvus_helper.h\"\n";
   for (const auto& h : module_headers) {
     os << "#include \"" << h << "\"\n";
   }
@@ -324,7 +323,6 @@ std::string generate_top_header(const std::string& output_base,
   os << "#define " << guard << "\n\n";
   write_includes(os, module_headers);
   os << "namespace corvus_generated {\n\n";
-  os << "namespace detail = corvus_helper;\n\n";
   std::string counts_guard = sanitize_guard(output_base + "_COUNTS");
   os << "#ifndef " << counts_guard << "\n";
   os << "#define " << counts_guard << "\n";
@@ -384,7 +382,6 @@ std::string generate_top_cpp(const std::string& output_base,
   }
   os << "\nnamespace corvus_generated {\n\n";
   std::string ext_class = external_mod ? external_mod->class_name : "";
-  os << "namespace detail = corvus_helper;\n\n";
 
   os << top_class << "::" << top_class << "(CorvusTopSynctreeEndpoint* topSynctreeEndpoint,\n";
   os << "                                     std::vector<CorvusBusEndpoint*> mBusEndpoints)\n";
@@ -403,16 +400,16 @@ std::string generate_top_cpp(const std::string& output_base,
     os << "  return new VerilatorModuleHandle<" << ext_class << ">(inst);\n";
     os << "}\n";
     os << "void " << top_class << "::deleteExternalModule() {\n";
-    os << "  auto* handle = static_cast<VerilatorModuleHandle<" << ext_class << ">*>(eHandle);\n";
+    os << "  auto* handle = static_cast<VerilatorModuleHandle<" << ext_class << ">*>(eModule);\n";
     os << "  if (handle) {\n";
     os << "    delete handle->mp;\n";
     os << "    delete handle;\n";
-    os << "    eHandle = nullptr;\n";
+    os << "    eModule = nullptr;\n";
     os << "  }\n";
     os << "}\n";
   } else {
     os << "ModuleHandle* " << top_class << "::createExternalModule() { return nullptr; }\n";
-    os << "void " << top_class << "::deleteExternalModule() { eHandle = nullptr; }\n";
+    os << "void " << top_class << "::deleteExternalModule() { eModule = nullptr; }\n";
   }
 
   // MBus communication temporarily disabled; TODO: reintroduce once sync strategy settles
@@ -440,7 +437,6 @@ std::string generate_worker_header(const std::string& output_base,
   os << "#define " << guard << "\n\n";
   write_includes(os, module_headers);
   os << "namespace corvus_generated {\n\n";
-  os << "namespace detail = corvus_helper;\n\n";
   os << "#ifndef " << counts_guard << "\n";
   os << "#define " << counts_guard << "\n";
   os << "inline constexpr size_t kCorvusGenMBusCount = " << mbus_count << ";\n";
@@ -482,7 +478,6 @@ std::string generate_worker_cpp(const std::string& output_base,
     os << "#include \"" << h << "\"\n";
   }
   os << "\nnamespace corvus_generated {\n\n";
-  os << "namespace detail = corvus_helper;\n\n";
   (void)mbus_count;
   (void)sbus_count;
   (void)top_slot_bits;
@@ -529,14 +524,17 @@ std::string generate_worker_cpp(const std::string& output_base,
   os << "  auto* seq = seqHandle ? seqHandle->mp : nullptr;\n";
   os << "  if (!comb || !seq) return;\n";
   for (const auto& conn : wp.local_cts) {
-    if (!conn.driver.port || conn.receivers.empty() || !conn.receivers[0].port) continue;
+    if (!conn.driver.port) continue;
     std::string src = "comb->" + conn.driver.port->name;
-    std::string dst = "seq->" + conn.receivers[0].port->name;
-    if (conn.width_type == PortWidthType::VL_W) {
-      int words = conn.driver.port ? conn.driver.port->array_size : conn.receivers[0].port->array_size;
-      os << "  for (int i = 0; i < " << words << "; ++i) { " << dst << "[i] = " << src << "[i]; }\n";
-    } else {
-      os << "  " << dst << " = " << src << ";\n";
+    for (const auto& recv : conn.receivers) {
+      if (!recv.port) continue;
+      std::string dst = "seq->" + recv.port->name;
+      if (conn.width_type == PortWidthType::VL_W) {
+        int words = recv.port ? recv.port->array_size : conn.driver.port->array_size;
+        os << "  for (int i = 0; i < " << words << "; ++i) { " << dst << "[i] = " << src << "[i]; }\n";
+      } else {
+        os << "  " << dst << " = " << src << ";\n";
+      }
     }
   }
   os << "}\n\n";
@@ -554,14 +552,17 @@ std::string generate_worker_cpp(const std::string& output_base,
   os << "  auto* seq = seqHandle ? seqHandle->mp : nullptr;\n";
   os << "  if (!comb || !seq) return;\n";
   for (const auto& conn : wp.local_stc) {
-    if (!conn.driver.port || conn.receivers.empty() || !conn.receivers[0].port) continue;
+    if (!conn.driver.port) continue;
     std::string src = "seq->" + conn.driver.port->name;
-    std::string dst = "comb->" + conn.receivers[0].port->name;
-    if (conn.width_type == PortWidthType::VL_W) {
-      int words = conn.driver.port ? conn.driver.port->array_size : conn.receivers[0].port->array_size;
-      os << "  for (int i = 0; i < " << words << "; ++i) { " << dst << "[i] = " << src << "[i]; }\n";
-    } else {
-      os << "  " << dst << " = " << src << ";\n";
+    for (const auto& recv : conn.receivers) {
+      if (!recv.port) continue;
+      std::string dst = "comb->" + recv.port->name;
+      if (conn.width_type == PortWidthType::VL_W) {
+        int words = recv.port ? recv.port->array_size : conn.driver.port->array_size;
+        os << "  for (int i = 0; i < " << words << "; ++i) { " << dst << "[i] = " << src << "[i]; }\n";
+      } else {
+        os << "  " << dst << " = " << src << ";\n";
+      }
     }
   }
   os << "}\n\n";

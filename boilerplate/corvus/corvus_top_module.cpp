@@ -48,7 +48,7 @@ void CorvusTopModule::eval() {
 }
 
 void CorvusTopModule::evalE() {
-    eHandle->eval();
+    eModule->eval();
 }
 
 bool CorvusTopModule::allSimWorkerSFinish() {

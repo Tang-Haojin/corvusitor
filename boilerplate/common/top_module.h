@@ -11,7 +11,7 @@ public:
 
     void init() {
         topPorts = createTopPorts();
-        eHandle = createExternalModule();
+        eModule = createExternalModule();
     }
     void cleanup() {
         deleteExternalModule();
@@ -21,7 +21,7 @@ public:
     TopPorts* topPorts = nullptr;
     virtual void prepareSimWorker() = 0;
     virtual void evalE() {
-        eHandle->eval();
+        eModule->eval();
     }
     virtual void eval() = 0;
 protected:
@@ -30,7 +30,7 @@ protected:
     virtual ModuleHandle* createExternalModule() = 0;
     virtual void deleteExternalModule() = 0;
 protected:
-    ModuleHandle* eHandle = nullptr;
+    ModuleHandle* eModule = nullptr;
 };
 
 #endif

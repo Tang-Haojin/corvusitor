@@ -34,7 +34,6 @@
 - MBus：Top↔Worker。Top 下发 I/Eo，Worker 上送 O/Ei，`targetId`=0 表示 Top，1..N 表示各分区。
 - SBus：Worker↔Worker。仅承载 `remote_s_to_c`（S→C 跨分区）。
 - 本地直连：同分区的 Ct→Si / St→Ci 直接内存拷贝，不经总线。
-- 辅助库：`boilerplate/corvus/corvus_helper.h` 提供位掩码、payload 打包/解包，以及 VlWide 的跨 word 读写。
 
 ## 生成代码结构
 - `C<output>TopModuleGen`：持有 `TopPortsGen`，负责 I/Eo 发送与 O/Ei 接收，并在运行期 `assert` 校验 `kCorvusGenMBusCount`。
@@ -60,7 +59,7 @@
    - 提升 Top 同步标志：`topSyncFlag.updateToNext()` 后写入 `setTopSyncFlag(topSyncFlag)`。
    - 等待 Worker 报告 S 阶段完成：先等待 MBus 清空，再等待 `getSimWorkerSFinishFlag()` 从 `prevSFinishFlag.nextValue()` 达到一致；成功后将 `prevSFinishFlag.updateToNext()`。
    - 接收 Top 输出与 External 输入：`loadOAndEInput()`。
-   - 额外：`prepareSimWorker()` 在启动前设置 `setSimWorkerStartFlag(START_GUARD)`；`evalE()` 驱动 external 的 `eHandle->eval()`。
+   - 额外：`prepareSimWorker()` 在启动前设置 `setSimWorkerStartFlag(START_GUARD)`；`evalE()` 驱动 external 的 `eModule->eval()`。
 
 - Worker 周期（`SimWorker::loop()`）
    - 等待 Top 同步变化：轮询 `getTopSyncFlag()`，当等于本地 `prevTopSyncFlag.nextValue()` 时，更新 `prevTopSyncFlag.updateToNext()` 并进入本轮。

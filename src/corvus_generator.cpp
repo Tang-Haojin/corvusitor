@@ -700,19 +700,17 @@ std::string generate_worker_cpp(const std::string& output_base,
       os << "    for (size_t idx = 0; idx < decoders.size(); ++idx) {\n";
       os << "      if (!decoders[idx].complete()) continue;\n";
       os << "      switch (idx) {\n";
-      size_t ri = 0;
-      for (const auto& slot : wp.downlinks) {
-        if (slot.chunk.chunk_count == 1 && slot.sig.width_type != PortWidthType::VL_W) { ++ri; continue; }
-        os << "      case " << ri << ": {\n";
-        if (slot.sig.width_type == PortWidthType::VL_W) {
-          os << "        corvus_helper::apply_to_wide(decoders[idx], reinterpret_cast<uint32_t*>(&comb->" << slot.sig.name << "), " << slot.sig.array_size << ");\n";
+      for (size_t decIdx = 0; decIdx < decode_slots.size(); ++decIdx) {
+        const auto* slot = decode_slots[decIdx];
+        os << "      case " << decIdx << ": {\n";
+        if (slot->sig.width_type == PortWidthType::VL_W) {
+          os << "        corvus_helper::apply_to_wide(decoders[idx], reinterpret_cast<uint32_t*>(&comb->" << slot->sig.name << "), " << slot->sig.array_size << ");\n";
         } else {
           os << "        uint64_t value = corvus_helper::assemble_scalar(decoders[idx]);\n";
-          os << "        comb->" << slot.sig.name << " = static_cast<" << cpp_type_from_signal(slot.sig) << ">(value & corvus_helper::mask_bits(" << slot.sig.width << "));\n";
+          os << "        comb->" << slot->sig.name << " = static_cast<" << cpp_type_from_signal(slot->sig) << ">(value & corvus_helper::mask_bits(" << slot->sig.width << "));\n";
         }
         os << "        break;\n";
         os << "      }\n";
-        ++ri;
       }
       os << "      default: break;\n";
       os << "      }\n";
@@ -775,19 +773,17 @@ std::string generate_worker_cpp(const std::string& output_base,
       os << "    for (size_t idx = 0; idx < decoders.size(); ++idx) {\n";
       os << "      if (!decoders[idx].complete()) continue;\n";
       os << "      switch (idx) {\n";
-      size_t ri = 0;
-      for (const auto& slot : wp.remote_recv) {
-        if (slot.chunk.chunk_count == 1 && slot.sig.width_type != PortWidthType::VL_W) { ++ri; continue; }
-        os << "      case " << ri << ": {\n";
-        if (slot.sig.width_type == PortWidthType::VL_W) {
-          os << "        detail::apply_to_wide(decoders[idx], reinterpret_cast<uint32_t*>(&comb->" << slot.sig.name << "), " << slot.sig.array_size << ");\n";
+      for (size_t decIdx = 0; decIdx < decode_slots.size(); ++decIdx) {
+        const auto* slot = decode_slots[decIdx];
+        os << "      case " << decIdx << ": {\n";
+        if (slot->sig.width_type == PortWidthType::VL_W) {
+          os << "        detail::apply_to_wide(decoders[idx], reinterpret_cast<uint32_t*>(&comb->" << slot->sig.name << "), " << slot->sig.array_size << ");\n";
         } else {
           os << "        uint64_t value = detail::assemble_scalar(decoders[idx]);\n";
-          os << "        comb->" << slot.sig.name << " = static_cast<" << cpp_type_from_signal(slot.sig) << ">(value & detail::mask_bits(" << slot.sig.width << "));\n";
+          os << "        comb->" << slot->sig.name << " = static_cast<" << cpp_type_from_signal(slot->sig) << ">(value & detail::mask_bits(" << slot->sig.width << "));\n";
         }
         os << "        break;\n";
         os << "      }\n";
-        ++ri;
       }
       os << "      default: break;\n";
       os << "      }\n";

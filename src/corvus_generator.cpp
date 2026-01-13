@@ -12,66 +12,15 @@
 
 namespace {
 
-struct ChunkPlan {
-  int data_bits = 0;
-  int chunk_bits = 0;
-  int chunk_count = 1;
-};
-
 int slot_bits_for_count(size_t count) {
-  int bits = 0;
-  size_t value = (count == 0) ? 0 : (count - 1);
-  while (value > 0) {
-    bits++;
-    value >>= 1;
-  }
-  if (bits <= 8) return 8;
-  if (bits <= 16) return 16;
+  // Protocol: fixed 48-bit frame: [47:32]=slotData(16-bit), [31:0]=slotId(32-bit)
+  (void)count;
   return 32;
 }
 
-ChunkPlan compute_chunk_plan(int width, int slot_bits) {
-  ChunkPlan plan;
-  auto choose_data_bits = [&](int chunk_bits) -> int {
-    int space = 48 - slot_bits - chunk_bits;
-    int choice = 0;
-    for (int candidate : {32, 16, 8}) {
-      if (candidate <= space && candidate > choice) {
-        choice = candidate;
-      }
-    }
-    return choice;
-  };
-
-  int data_candidate = choose_data_bits(0);
-  if (width <= data_candidate) {
-    plan.data_bits = data_candidate;
-    plan.chunk_bits = 0;
-    plan.chunk_count = 1;
-    return plan;
-  }
-
-  for (int chunk_bits : {8, 16, 32}) {
-    int data_bits = choose_data_bits(chunk_bits);
-    if (data_bits <= 0) continue;
-    int chunk_count = (width + data_bits - 1) / data_bits;
-    if (chunk_count <= (1 << chunk_bits)) {
-      plan.data_bits = data_bits;
-      plan.chunk_bits = chunk_bits;
-      plan.chunk_count = chunk_count;
-      return plan;
-    }
-  }
-
-  // Fallback (should not normally hit)
-  plan.chunk_bits = 8;
-  plan.data_bits = choose_data_bits(plan.chunk_bits);
-  if (plan.data_bits <= 0) {
-    plan.data_bits = 8;
-  }
-  plan.chunk_count = (width + plan.data_bits - 1) / plan.data_bits;
-  if (plan.chunk_count <= 0) plan.chunk_count = 1;
-  return plan;
+int slice_count_for_width(int width) {
+  int slices = (width + 15) / 16;
+  return slices > 0 ? slices : 1;
 }
 
 int array_size_from_endpoint(const SignalEndpoint& ep, PortWidthType width_type) {
@@ -131,31 +80,36 @@ SignalRef build_signal(const ClassifiedConnection& conn,
   return ref;
 }
 
+struct SlotSlice {
+  int slot_id = 0;
+  int bit_offset = 0;
+};
+
 struct DownlinkSlot {
   SignalRef sig;
   bool from_external = false;
   int slot_id = 0;
-  int slot_bits = 8;
+  int slot_bits = 32;
   int bus_index = 0;
-  ChunkPlan chunk;
+  std::vector<SlotSlice> slices;
 };
 
 struct TopSlot {
   SignalRef sig;
   bool to_external = false;
   int slot_id = 0;
-  int slot_bits = 8;
+  int slot_bits = 32;
   int bus_index = 0;
-  ChunkPlan chunk;
+  std::vector<SlotSlice> slices;
 };
 
 struct RemoteRecvSlot {
   SignalRef sig;
   int from_pid = -1;
   int slot_id = 0;
-  int slot_bits = 8;
+  int slot_bits = 32;
   int bus_index = 0;
-  ChunkPlan chunk;
+  std::vector<SlotSlice> slices;
 };
 
 struct WorkerPlan {
@@ -166,8 +120,48 @@ struct WorkerPlan {
   std::vector<RemoteRecvSlot> remote_recv;
   std::vector<ClassifiedConnection> local_cts;
   std::vector<ClassifiedConnection> local_stc;
-  int mbus_slot_bits = 8;
-  int remote_slot_bits = 8;
+  int mbus_slot_bits = 32;
+  int remote_slot_bits = 32;
+};
+
+std::vector<SlotSlice> build_slot_slices(const SignalRef& sig, int base_slot) {
+  int slices = slice_count_for_width(sig.width);
+  std::vector<SlotSlice> slice_map;
+  slice_map.reserve(static_cast<size_t>(slices));
+  for (int i = 0; i < slices; ++i) {
+    SlotSlice slice;
+    slice.slot_id = base_slot + i;
+    slice.bit_offset = i * 16;
+    slice_map.push_back(slice);
+  }
+  return slice_map;
+}
+
+class SlotAddressSpace {
+public:
+  explicit SlotAddressSpace(int bus_count)
+      : bus_count_(std::max(1, bus_count)) {}
+
+  template <typename SlotContainer>
+  void assign_slots(SlotContainer& slots) {
+    for (auto& slot : slots) {
+      int base = next_slot_;
+      slot.slot_id = base;
+      slot.slices = build_slot_slices(slot.sig, base);
+      next_slot_ += static_cast<int>(slot.slices.size());
+      slot.slot_bits = slot_bits_for_count(static_cast<size_t>(next_slot_));
+      slot.bus_index = bus_cursor_;
+      bus_cursor_ = (bus_cursor_ + 1) % bus_count_;
+    }
+  }
+
+  int total_slots() const { return next_slot_; }
+  int slot_bits() const { return slot_bits_for_count(static_cast<size_t>(next_slot_)); }
+
+private:
+  int next_slot_ = 0;
+  int bus_cursor_ = 0;
+  int bus_count_ = 1;
 };
 
 void write_endpoint(std::ostream& os, const SignalEndpoint& ep) {
@@ -372,8 +366,6 @@ std::string generate_top_cpp(const std::string& output_base,
   (void)mbus_count;
   (void)sbus_count;
   (void)workers;
-  (void)top_slots;
-  (void)top_slot_bits;
 
   std::ostringstream os;
   os << "#include \"" << path_basename(top_header_name) << "\"\n";
@@ -418,7 +410,58 @@ std::string generate_top_cpp(const std::string& output_base,
   os << "}\n\n";
 
   os << "void " << top_class << "::loadOAndEInput() {\n";
-  os << "  // TODO: implement MBus uplink once protocol is finalized.\n";
+  os << "  auto* ports = static_cast<" << top_class << "::TopPortsGen*>(topPorts);\n";
+  os << "  (void)ports;\n";
+  if (!top_slots.empty()) {
+    const std::string slot_mask_hex = "0xFFFFFFFFULL";
+    if (external_mod) {
+      os << "  auto* eHandle = static_cast<VerilatorModuleHandle<" << ext_class << ">*>(eModule);\n";
+      os << "  auto* ext = eHandle ? eHandle->mp : nullptr;\n";
+      os << "  (void)ext;\n";
+    } else {
+      os << "  (void)eModule;\n";
+    }
+    os << "  const uint64_t kSlotMask = " << slot_mask_hex << ";\n";
+    os << "  for (size_t ep = 0; ep < mBusEndpoints.size(); ++ep) {\n";
+    os << "    int cnt = mBusEndpoints[ep]->bufferCnt();\n";
+    os << "    for (int i = 0; i < cnt; ++i) {\n";
+    os << "      uint64_t payload = mBusEndpoints[ep]->recv();\n";
+    os << "      uint32_t slotId = static_cast<uint32_t>(payload & kSlotMask);\n";
+    os << "      switch (slotId) {\n";
+    for (const auto& slot : top_slots) {
+      const auto& sig = slot.sig;
+      const std::string data_mask_hex = "0xFFFFULL";
+      const std::string dst_expr = slot.to_external
+        ? (std::string("ext->") + (sig.receiver.port ? sig.receiver.port->name : sig.name))
+        : (std::string("ports->") + sig.name);
+      const std::string dst_guard = slot.to_external ? "ext" : "ports";
+        for (const auto& slice : slot.slices) {
+          os << "      case " << slice.slot_id << ": {\n";
+          os << "        uint64_t data = (payload >> 32) & " << data_mask_hex << ";\n";
+          os << "        int bitOffset = " << slice.bit_offset << ";\n";
+        if (sig.width_type == PortWidthType::VL_W) {
+          os << "        int word = bitOffset / 32;\n";
+          os << "        int wordBit = bitOffset % 32;\n";
+          os << "        if (" << dst_guard << ") {\n";
+          os << "          uint32_t lowMask = static_cast<uint32_t>(" << data_mask_hex << " << wordBit);\n";
+          os << "          uint32_t lowBits = static_cast<uint32_t>(data << wordBit);\n";
+          os << "          " << dst_expr << "[word] = (" << dst_expr << "[word] & ~lowMask) | lowBits;\n";
+          os << "        }\n";
+        } else {
+          os << "        uint64_t cur = static_cast<uint64_t>(" << dst_expr << ");\n";
+          os << "        uint64_t mask = (" << data_mask_hex << ") << bitOffset;\n";
+          os << "        cur = (cur & ~mask) | ((data & " << data_mask_hex << ") << bitOffset);\n";
+          os << "        " << dst_expr << " = static_cast<" << cpp_type_from_signal(sig) << ">(cur);\n";
+        }
+          os << "        break;\n";
+          os << "      }\n";
+      }
+    }
+    os << "      default: break;\n";
+    os << "      }\n";
+    os << "    }\n";
+    os << "  }\n";
+  }
   os << "}\n\n";
 
   os << "} // namespace corvus_generated\n";
@@ -481,7 +524,6 @@ std::string generate_worker_cpp(const std::string& output_base,
   (void)mbus_count;
   (void)sbus_count;
   (void)top_slot_bits;
-  (void)send_to_top;
   (void)remote_send_map;
 
   os << worker_class << "::" << worker_class << "(\n";
@@ -513,8 +555,52 @@ std::string generate_worker_cpp(const std::string& output_base,
 
   // sendRemoteCOutputs
   os << "void " << worker_class << "::sendRemoteCOutputs() {\n";
-  os << "  // TODO: MBus send path disabled during refactor.\n";
-  os << "}\n\n";
+  os << "  auto* combHandle = static_cast<VerilatorModuleHandle<" << wp.comb->class_name << ">* >(cModule);\n";
+  os << "  auto* comb = combHandle ? combHandle->mp : nullptr;\n";
+  os << "  if (!comb) return;\n";
+  os << "  uint64_t payload = 0;\n";
+  os << "  uint64_t slice_data = 0;\n";
+  auto send_it = send_to_top.find(wp.pid);
+  if (send_it == send_to_top.end() || send_it->second.empty()) {
+    os << "  (void)payload; (void)slice_data;\n";
+    os << "}\n\n";
+  } else {
+    for (const auto* slot : send_it->second) {
+      const auto& sig = slot->sig;
+      std::string src = "comb->" + (sig.driver.port ? sig.driver.port->name : sig.name);
+      const std::string data_mask_hex = "0xFFFFULL";
+      os << "  {\n";
+      os << "    // slot " << sig.name << " (base slotId=" << slot->slot_id << ")\n";
+      if (sig.width_type == PortWidthType::VL_W) {
+        for (const auto& slice : slot->slices) {
+          os << "    {\n";
+          os << "      int bitOffset = " << slice.bit_offset << ";\n";
+          os << "      int word = bitOffset / 32;\n";
+          os << "      int wordBit = bitOffset % 32;\n";
+          os << "      slice_data = static_cast<uint64_t>(" << src << "[word]);\n";
+          os << "      slice_data >>= wordBit;\n";
+          os << "      slice_data &= " << data_mask_hex << ";\n";
+          os << "      payload = static_cast<uint64_t>(" << slice.slot_id << ");\n";
+          os << "      payload |= (slice_data << 32);\n";
+          os << "      mBusEndpoints[" << slot->bus_index << "]->send(0, payload);\n";
+          os << "    }\n";
+        }
+      } else {
+        os << "    uint64_t src_val = static_cast<uint64_t>(" << src << ");\n";
+        for (const auto& slice : slot->slices) {
+          os << "    {\n";
+          os << "      int bitOffset = " << slice.bit_offset << ";\n";
+          os << "      slice_data = (src_val >> bitOffset) & " << data_mask_hex << ";\n";
+          os << "      payload = static_cast<uint64_t>(" << slice.slot_id << ");\n";
+          os << "      payload |= (slice_data << 32);\n";
+          os << "      mBusEndpoints[" << slot->bus_index << "]->send(0, payload);\n";
+          os << "    }\n";
+        }
+      }
+      os << "  }\n";
+    }
+    os << "}\n\n";
+  }
 
   // loadSInputs (local C->S)
   os << "void " << worker_class << "::loadSInputs() {\n";
@@ -704,29 +790,17 @@ bool CorvusGenerator::generate(const ConnectionAnalysis& analysis,
         if (a.sig.name != b.sig.name) return a.sig.name < b.sig.name;
         return a.from_external < b.from_external;
       });
-      wp.mbus_slot_bits = slot_bits_for_count(wp.downlinks.size());
-      size_t downlink_ep = 0;
-      for (size_t i = 0; i < wp.downlinks.size(); ++i) {
-        wp.downlinks[i].slot_id = static_cast<int>(i);
-        wp.downlinks[i].slot_bits = wp.mbus_slot_bits;
-        wp.downlinks[i].chunk = compute_chunk_plan(wp.downlinks[i].sig.width, wp.downlinks[i].slot_bits);
-        wp.downlinks[i].bus_index = static_cast<int>(downlink_ep % static_cast<size_t>(mbus_count_clamped));
-        ++downlink_ep;
-      }
+      SlotAddressSpace downlink_space(mbus_count_clamped);
+      downlink_space.assign_slots(wp.downlinks);
+      wp.mbus_slot_bits = downlink_space.slot_bits();
 
       std::sort(wp.remote_recv.begin(), wp.remote_recv.end(), [](const RemoteRecvSlot& a, const RemoteRecvSlot& b) {
         if (a.from_pid != b.from_pid) return a.from_pid < b.from_pid;
         return a.sig.name < b.sig.name;
       });
-      wp.remote_slot_bits = slot_bits_for_count(wp.remote_recv.size());
-      size_t remote_ep = 0;
-      for (size_t i = 0; i < wp.remote_recv.size(); ++i) {
-        wp.remote_recv[i].slot_id = static_cast<int>(i);
-        wp.remote_recv[i].slot_bits = wp.remote_slot_bits;
-        wp.remote_recv[i].chunk = compute_chunk_plan(wp.remote_recv[i].sig.width, wp.remote_recv[i].slot_bits);
-        wp.remote_recv[i].bus_index = static_cast<int>(remote_ep % static_cast<size_t>(sbus_count_clamped));
-        ++remote_ep;
-      }
+      SlotAddressSpace remote_space(sbus_count_clamped);
+      remote_space.assign_slots(wp.remote_recv);
+      wp.remote_slot_bits = remote_space.slot_bits();
     }
 
     std::sort(top_slots.begin(), top_slots.end(), [](const TopSlot& a, const TopSlot& b) {
@@ -734,15 +808,9 @@ bool CorvusGenerator::generate(const ConnectionAnalysis& analysis,
       if (a.sig.name != b.sig.name) return a.sig.name < b.sig.name;
       return a.sig.driver_pid < b.sig.driver_pid;
     });
-    int top_slot_bits = slot_bits_for_count(top_slots.size());
-    size_t top_ep = 0;
-    for (size_t i = 0; i < top_slots.size(); ++i) {
-      top_slots[i].slot_id = static_cast<int>(i);
-      top_slots[i].slot_bits = top_slot_bits;
-      top_slots[i].chunk = compute_chunk_plan(top_slots[i].sig.width, top_slots[i].slot_bits);
-      top_slots[i].bus_index = static_cast<int>(top_ep % static_cast<size_t>(mbus_count_clamped));
-      ++top_ep;
-    }
+    SlotAddressSpace top_space(mbus_count_clamped);
+    top_space.assign_slots(top_slots);
+    int top_slot_bits = top_space.slot_bits(); // fixed slotId width per protocol
 
     std::map<int, std::vector<const TopSlot*>> send_to_top;
     for (const auto& slot : top_slots) {

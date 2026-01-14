@@ -108,7 +108,8 @@ int main(int argc, char* argv[]) {
       repo_root, parse_string_arg(args, {std::string("--corvusitor-bin")}, "./build/corvusitor"));
 
   // Clean stale artifacts to ensure we validate the new generation.
-  std::remove((output_base + "_corvus.json").c_str());
+  std::remove((output_base + "_connection_analysis.json").c_str());
+  std::remove((output_base + "_corvus_bus_plan.json").c_str());
   const std::string prefix = class_prefix(output_base);
   std::remove(join_path(output_dir, prefix + "CorvusGen.h").c_str());
   std::remove(join_path(output_dir, prefix + "CModelGen.h").c_str());
@@ -127,7 +128,7 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
-  std::ifstream json(output_base + "_corvus.json");
+  std::ifstream json(output_base + "_corvus_bus_plan.json");
   if (!json.is_open()) {
     std::cerr << "Missing YuQuan corvus json\n";
     return 1;

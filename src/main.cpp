@@ -134,7 +134,8 @@ int main(int argc, char* argv[]) {
   std::cout << "  Generation Successful!\n";
   std::cout << "====================================================\n";
   std::cout << "\nArtifacts:\n";
-  std::cout << "  - " << output_base << "_corvus.json\n";
+  std::cout << "  - " << output_base << "_connection_analysis.json\n";
+  std::cout << "  - " << output_base << "_corvus_bus_plan.json\n";
   std::cout << "  - " << join_path(output_dir, prefix + "CorvusGen.h") << " (includes generated headers)\n";
   std::cout << "  - " << join_path(output_dir, prefix + "TopModuleGen.h") << " / "
             << join_path(output_dir, prefix + "TopModuleGen.cpp") << "\n";

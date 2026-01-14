@@ -46,7 +46,8 @@ void CorvusCModelIdealizedBusEndpoint::send(uint32_t targetId, uint64_t payload)
 uint64_t CorvusCModelIdealizedBusEndpoint::recv() {
     std::lock_guard<std::mutex> lock(bufferMutex);
     if (buffer.empty()) {
-        return 0;
+        // 报错
+        throw std::out_of_range("read empty buffer!");
     }
     uint64_t payload = buffer.front();
     buffer.pop_front();

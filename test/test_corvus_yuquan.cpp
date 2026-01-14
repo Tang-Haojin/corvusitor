@@ -95,7 +95,8 @@ int main(int argc, char* argv[]) {
       args, {std::string("--corvusitor-bin")}, "./build/corvusitor");
 
   // Clean stale artifacts to ensure we validate the new generation.
-  std::remove((output_base + "_corvus.json").c_str());
+  std::remove((output_base + "_connection_analysis.json").c_str());
+  std::remove((output_base + "_corvus_bus_plan.json").c_str());
   std::remove(join_path(output_dir, class_prefix(output_base) + "CorvusGen.h").c_str());
 
   std::ostringstream cmd;
@@ -111,14 +112,14 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
-  std::ifstream json(output_base + "_corvus.json");
-  if (!json.is_open()) {
+  std::ifstream plan(output_base + "_corvus_bus_plan.json");
+  if (!plan.is_open()) {
     std::cerr << "Missing YuQuan corvus json\n";
     return 1;
   }
-  std::string json_content((std::istreambuf_iterator<char>(json)),
+  std::string json_content((std::istreambuf_iterator<char>(plan)),
                            std::istreambuf_iterator<char>());
-  if (json_content.find("recv_plans") == std::string::npos ||
+  if (json_content.find("simWorkerPlans") == std::string::npos ||
       json_content.find("\"0\"") == std::string::npos) {
     std::cerr << "YuQuan json lacks expected recv plan sections\n";
     return 1;

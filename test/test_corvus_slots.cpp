@@ -152,14 +152,14 @@ int main() {
   }
 
   // Verify JSON includes remote_s_to_c
-  std::ifstream ifs(base + "_corvus.json");
-  if (!ifs.is_open()) {
+  std::ifstream plan(base + "_corvus_bus_plan.json");
+  if (!plan.is_open()) {
     std::cerr << "Missing output json\n";
     return 1;
   }
-  std::string json_content((std::istreambuf_iterator<char>(ifs)),
+  std::string json_content((std::istreambuf_iterator<char>(plan)),
                            std::istreambuf_iterator<char>());
-  if (json_content.find("recv_plans") == std::string::npos ||
+  if (json_content.find("sendRemoteSOutputs") == std::string::npos ||
       json_content.find("s0_to_c1") == std::string::npos) {
     std::cerr << "s0_to_c1 mapping not found in JSON\n";
     return 1;

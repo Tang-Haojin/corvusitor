@@ -198,7 +198,8 @@ yuquan_corvus_sim: $(CORVUSITOR_BIN)
 clean:
 	rm -rf $(BUILD_DIR)
 	rm -rf $(YUQUAN_SIM_DIR)/corvusitor-compile
-	rm -f $(YUQUAN_OUTPUT_DIR)/$(YUQUAN_OUTPUT_NAME)_corvus.json
+	rm -f $(YUQUAN_OUTPUT_DIR)/$(YUQUAN_OUTPUT_NAME)_connection_analysis.json
+	rm -f $(YUQUAN_OUTPUT_DIR)/$(YUQUAN_OUTPUT_NAME)_corvus_bus_plan.json
 	rm -f $(YUQUAN_OUTPUT_DIR)/C$(YUQUAN_OUTPUT_NAME)*
 
 ## Show help

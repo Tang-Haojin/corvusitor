@@ -19,7 +19,8 @@
   --target corvus            # 或 cmodel，默认为 corvus
 ```
 3) 产物  
-   - `<output>_corvus.json`：`ConnectionAnalysis` 快照，可作为其他生成/检查输入。  
+   - `<output>_connection_analysis.json`：`ConnectionAnalysis` 快照，可作为其他生成/检查输入。  
+   - `<output>_corvus_bus_plan.json`：由 ConnectionAnalysis 推导的 `CorvusBusPlan`，记录 slot 编址与拷贝计划。  
    - `C<output>TopModuleGen.{h,cpp}`：TopPorts/TopModule 实现。  
    - `C<output>SimWorkerGenP<ID>.{h,cpp>`：每个分区一个 worker 实现。  
    - `C<output>CorvusGen.h`：聚合头，包含所有 top/worker 头。  

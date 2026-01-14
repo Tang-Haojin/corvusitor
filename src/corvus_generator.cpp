@@ -1,29 +1,102 @@
 #include "corvus_generator.h"
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <fstream>
 #include <iostream>
 #include <map>
 #include <set>
 #include <sstream>
 #include <string>
-#include <unordered_map>
+#include <type_traits>
 #include <vector>
 
 namespace {
 
-using SignalRef = CorvusGenerator::SignalRef;
-using SlotRecord = CorvusGenerator::SlotRecord;
-using RecvSignal = CorvusGenerator::RecvSignal;
-using RecvPlan = CorvusGenerator::RecvPlan;
-using WorkerPlan = CorvusGenerator::WorkerPlan;
-using AddressPlan = CorvusGenerator::AddressPlan;
+using SlotRecvRecord = CorvusGenerator::SlotRecvRecord;
+using SlotSendRecord = CorvusGenerator::SlotSendRecord;
+using CopyRecord = CorvusGenerator::CopyRecord;
+using TopModulePlan = CorvusGenerator::TopModulePlan;
+using SimWorkerPlan = CorvusGenerator::SimWorkerPlan;
+using CorvusBusPlan = CorvusGenerator::CorvusBusPlan;
 
-int slot_bits_for_count(size_t count) {
-  // Protocol: fixed 48-bit frame: [47:32]=slotData(16-bit), [31:0]=slotId(32-bit)
-  (void)count;
-  return 32;
-}
+struct SignalRef {
+  std::string name;
+  int width = 0;
+  PortWidthType width_type = PortWidthType::VL_8;
+  int array_size = 0;
+  SignalEndpoint driver;
+  SignalEndpoint receiver;
+};
+
+struct SlotRecvMeta {
+  SlotRecvRecord record;
+  int width = 0;
+  PortWidthType width_type = PortWidthType::VL_8;
+  int array_size = 0;
+  const ModuleInfo* driver_module = nullptr;
+  const PortInfo* driver_port = nullptr;
+  const ModuleInfo* receiver_module = nullptr;
+  const PortInfo* receiver_port = nullptr;
+  bool via_sbus = false;
+  bool from_external = false;
+  bool to_external = false;
+};
+
+struct SlotSendMeta {
+  SlotSendRecord record;
+  int width = 0;
+  PortWidthType width_type = PortWidthType::VL_8;
+  int array_size = 0;
+  const ModuleInfo* driver_module = nullptr;
+  const PortInfo* driver_port = nullptr;
+  bool from_external = false;
+  bool to_external = false;
+};
+
+struct CopyMeta {
+  CopyRecord record;
+  const ModuleInfo* driver_module = nullptr;
+  const PortInfo* driver_port = nullptr;
+  const ModuleInfo* receiver_module = nullptr;
+  const PortInfo* receiver_port = nullptr;
+  int width = 0;
+  PortWidthType width_type = PortWidthType::VL_8;
+  int array_size = 0;
+};
+
+struct WorkerGenPlan {
+  int pid = -1;
+  int next_slot = 0;
+  const ModuleInfo* comb = nullptr;
+  const ModuleInfo* seq = nullptr;
+  std::vector<SlotRecvMeta> mbus_recvs;
+  std::vector<SlotRecvMeta> sbus_recvs;
+  std::vector<SlotSendMeta> send_to_top;
+  std::vector<SlotSendMeta> send_remote;
+  std::vector<CopyMeta> copy_cts;
+  std::vector<CopyMeta> copy_stc;
+};
+
+struct TopGenPlan {
+  int next_slot = 0;
+  const ModuleInfo* external = nullptr;
+  std::map<std::string, SignalRef> top_inputs;
+  std::map<std::string, SignalRef> top_outputs;
+  std::vector<SlotSendMeta> send_inputs;
+  std::vector<SlotSendMeta> send_external_outputs;
+  std::vector<SlotRecvMeta> recv_outputs;
+  std::vector<SlotRecvMeta> recv_external_inputs;
+};
+
+struct GenerationPlan {
+  CorvusBusPlan bus_plan;
+  TopGenPlan top;
+  std::map<int, WorkerGenPlan> workers;
+  std::vector<std::string> warnings;
+  int mbus_count = 1;
+  int sbus_count = 1;
+};
 
 int slice_count_for_width(int width) {
   int slices = (width + 15) / 16;
@@ -65,9 +138,6 @@ SignalRef build_signal(const ClassifiedConnection& conn,
   ref.width_type = conn.width_type;
   ref.driver = conn.driver;
   ref.receiver = receiver;
-  ref.driver_pid = conn.driver.module ? conn.driver.module->partition_id : -1;
-  ref.receiver_pid = receiver.module ? receiver.module->partition_id : -1;
-  // Prefer driver for VL_W array size, otherwise fallback to receiver.
   if (conn.driver.port && conn.driver.port->width_type == PortWidthType::VL_W) {
     ref.array_size = conn.driver.port->array_size;
   } else {
@@ -76,57 +146,15 @@ SignalRef build_signal(const ClassifiedConnection& conn,
   return ref;
 }
 
-std::vector<SlotRecord> build_slot_records(const SignalRef& sig, int base_slot) {
-  int slices = slice_count_for_width(sig.width);
-  std::vector<SlotRecord> slice_map;
-  slice_map.reserve(static_cast<size_t>(slices));
-  for (int i = 0; i < slices; ++i) {
-    SlotRecord slice;
-    slice.slot_id = base_slot + i;
-    slice.bit_offset = i * 16;
-    slice_map.push_back(slice);
+std::string width_type_to_string(PortWidthType t) {
+  switch (t) {
+  case PortWidthType::VL_8: return "VL_8";
+  case PortWidthType::VL_16: return "VL_16";
+  case PortWidthType::VL_32: return "VL_32";
+  case PortWidthType::VL_64: return "VL_64";
+  case PortWidthType::VL_W: return "VL_W";
   }
-  return slice_map;
-}
-
-[[maybe_unused]] void write_endpoint(std::ostream& os, const SignalEndpoint& ep) {
-  os << "{ \"module\": \"" << (ep.module ? ep.module->instance_name : "null")
-     << "\", \"port\": \"" << (ep.port ? ep.port->name : "null") << "\" }";
-}
-
-[[maybe_unused]] void write_connections(std::ostream& os, const std::vector<ClassifiedConnection>& conns) {
-  os << "[";
-  for (size_t i = 0; i < conns.size(); ++i) {
-    const auto& c = conns[i];
-    os << "{ \"port\": \"" << c.port_name << "\", \"width\": " << c.width
-       << ", \"width_type\": " << static_cast<int>(c.width_type)
-       << ", \"driver\": ";
-    write_endpoint(os, c.driver);
-    os << ", \"receivers\": [";
-    for (size_t j = 0; j < c.receivers.size(); ++j) {
-      write_endpoint(os, c.receivers[j]);
-      if (j + 1 < c.receivers.size()) os << ", ";
-    }
-    os << "] }";
-    if (i + 1 < conns.size()) os << ", ";
-  }
-  os << "]";
-}
-
-void register_module(const SignalEndpoint& ep, WorkerPlan& plan,
-                     const ModuleInfo*& external_mod) {
-  if (!ep.module) return;
-  switch (ep.module->type) {
-  case ModuleType::COMB:
-    if (!plan.comb) plan.comb = ep.module;
-    break;
-  case ModuleType::SEQ:
-    if (!plan.seq) plan.seq = ep.module;
-    break;
-  case ModuleType::EXTERNAL:
-    if (!external_mod) external_mod = ep.module;
-    break;
-  }
+  return "UNKNOWN";
 }
 
 std::string sanitize_guard(const std::string& base) {
@@ -197,6 +225,38 @@ std::string aggregate_header_name(const std::string& output_base) {
   return "C" + output_token(output_base) + "CorvusGen.h";
 }
 
+WorkerGenPlan& ensure_worker_plan(int pid, GenerationPlan& plan) {
+  auto it = plan.workers.find(pid);
+  if (it == plan.workers.end()) {
+    WorkerGenPlan wp;
+    wp.pid = pid;
+    it = plan.workers.emplace(pid, std::move(wp)).first;
+  }
+  plan.bus_plan.simWorkerPlans[pid];
+  return it->second;
+}
+
+void register_module(const SignalEndpoint& ep, WorkerGenPlan& wp, TopGenPlan& top_plan) {
+  if (!ep.module) return;
+  switch (ep.module->type) {
+  case ModuleType::COMB:
+    if (!wp.comb) wp.comb = ep.module;
+    break;
+  case ModuleType::SEQ:
+    if (!wp.seq) wp.seq = ep.module;
+    break;
+  case ModuleType::EXTERNAL:
+    if (!top_plan.external) top_plan.external = ep.module;
+    break;
+  }
+}
+
+std::string cpp_type_from_meta(const SlotRecvMeta& meta) {
+  if (meta.receiver_port) return meta.receiver_port->get_cpp_type();
+  if (meta.driver_port) return meta.driver_port->get_cpp_type();
+  return cpp_type_from_endpoint({}, meta.width_type, meta.array_size);
+}
+
 std::string cpp_type_from_signal(const SignalRef& sig) {
   if (sig.driver.port) {
     return sig.driver.port->get_cpp_type();
@@ -205,6 +265,380 @@ std::string cpp_type_from_signal(const SignalRef& sig) {
     return sig.receiver.port->get_cpp_type();
   }
   return cpp_type_from_endpoint(sig.driver, sig.width_type, sig.array_size);
+}
+
+void sort_bus_plan(CorvusBusPlan& plan) {
+  auto sort_send = [](std::vector<SlotSendRecord>& v) {
+    std::sort(v.begin(), v.end(), [](const SlotSendRecord& a, const SlotSendRecord& b) {
+      if (a.targetId != b.targetId) return a.targetId < b.targetId;
+      if (a.slotId != b.slotId) return a.slotId < b.slotId;
+      if (a.portName != b.portName) return a.portName < b.portName;
+      return a.bitOffset < b.bitOffset;
+    });
+  };
+  auto sort_recv = [](std::vector<SlotRecvRecord>& v) {
+    std::sort(v.begin(), v.end(), [](const SlotRecvRecord& a, const SlotRecvRecord& b) {
+      if (a.slotId != b.slotId) return a.slotId < b.slotId;
+      if (a.portName != b.portName) return a.portName < b.portName;
+      return a.bitOffset < b.bitOffset;
+    });
+  };
+
+  sort_send(plan.topModulePlan.input);
+  sort_send(plan.topModulePlan.externalOutput);
+  sort_recv(plan.topModulePlan.output);
+  sort_recv(plan.topModulePlan.externalInput);
+
+  for (auto& kv : plan.simWorkerPlans) {
+    sort_recv(kv.second.loadRemoteCInputs.fromMBus);
+    sort_recv(kv.second.loadRemoteCInputs.fromSBus);
+    sort_send(kv.second.sendRemoteCOutputs);
+    sort_send(kv.second.sendRemoteSOutputs);
+    std::sort(kv.second.loadSInputs.begin(), kv.second.loadSInputs.end(),
+              [](const CopyRecord& a, const CopyRecord& b) { return a.portName < b.portName; });
+    std::sort(kv.second.loadLocalCInputs.begin(), kv.second.loadLocalCInputs.end(),
+              [](const CopyRecord& a, const CopyRecord& b) { return a.portName < b.portName; });
+  }
+}
+
+template <typename T>
+void sort_meta(std::vector<T>& v) {
+  std::sort(v.begin(), v.end(), [](const T& a, const T& b) {
+    if constexpr (std::is_same<T, SlotSendMeta>::value) {
+      if (a.record.targetId != b.record.targetId) return a.record.targetId < b.record.targetId;
+      if (a.record.slotId != b.record.slotId) return a.record.slotId < b.record.slotId;
+      if (a.record.portName != b.record.portName) return a.record.portName < b.record.portName;
+      return a.record.bitOffset < b.record.bitOffset;
+    } else {
+      if (a.record.slotId != b.record.slotId) return a.record.slotId < b.record.slotId;
+      if (a.record.portName != b.record.portName) return a.record.portName < b.record.portName;
+      return a.record.bitOffset < b.record.bitOffset;
+    }
+  });
+}
+
+GenerationPlan build_generation_plan(const ConnectionAnalysis& analysis,
+                                     int mbus_count,
+                                     int sbus_count) {
+  GenerationPlan gen;
+  gen.warnings = analysis.warnings;
+  gen.mbus_count = std::max(1, mbus_count);
+  gen.sbus_count = std::max(1, sbus_count);
+
+  auto add_top_slot = [&](int width, PortWidthType width_type, const SignalEndpoint& driver,
+                          const SignalEndpoint& receiver, bool to_external,
+                          std::vector<SlotRecvMeta>& metas, std::vector<SlotRecvRecord>& plan_vec) {
+    int slices = slice_count_for_width(width);
+    for (int i = 0; i < slices; ++i) {
+      SlotRecvRecord recv;
+      recv.portName = receiver.port ? receiver.port->name : driver.port ? driver.port->name : "";
+      recv.slotId = gen.top.next_slot++;
+      recv.bitOffset = i * 16;
+      SlotRecvMeta meta;
+      meta.record = recv;
+      meta.width = width;
+      meta.width_type = width_type;
+      meta.driver_module = driver.module;
+      meta.driver_port = driver.port;
+      meta.receiver_module = receiver.module;
+      meta.receiver_port = receiver.port;
+      meta.to_external = to_external;
+      meta.array_size = (receiver.port ? receiver.port->array_size : array_size_from_endpoint(driver, width_type));
+      metas.push_back(meta);
+      plan_vec.push_back(recv);
+    }
+  };
+
+  // Top inputs (I) -> workers (MBus)
+  for (const auto& conn : analysis.top_inputs) {
+    if (conn.receivers.empty()) continue;
+    // Record top IO type info
+    if (gen.top.top_inputs.find(conn.port_name) == gen.top.top_inputs.end()) {
+      gen.top.top_inputs.emplace(conn.port_name, build_signal(conn, conn.receivers.front()));
+    }
+    for (const auto& recv : conn.receivers) {
+      int pid = recv.module ? recv.module->partition_id : -1;
+      auto& wp = ensure_worker_plan(pid, gen);
+      register_module(recv, wp, gen.top);
+      int slices = slice_count_for_width(conn.width);
+      for (int i = 0; i < slices; ++i) {
+        SlotRecvRecord recv_rec;
+        recv_rec.portName = recv.port ? recv.port->name : conn.port_name;
+        recv_rec.slotId = wp.next_slot++;
+        recv_rec.bitOffset = i * 16;
+
+        SlotRecvMeta recv_meta;
+        recv_meta.record = recv_rec;
+        recv_meta.width = conn.width;
+        recv_meta.width_type = conn.width_type;
+        recv_meta.receiver_module = recv.module;
+        recv_meta.receiver_port = recv.port;
+        recv_meta.array_size = array_size_from_endpoint(recv, conn.width_type);
+
+        gen.bus_plan.simWorkerPlans[pid].loadRemoteCInputs.fromMBus.push_back(recv_rec);
+        wp.mbus_recvs.push_back(recv_meta);
+
+        SlotSendRecord send_rec;
+        send_rec.portName = conn.port_name;
+        send_rec.bitOffset = i * 16;
+        send_rec.targetId = pid + 1;
+        send_rec.slotId = recv_rec.slotId;
+
+        SlotSendMeta send_meta;
+        send_meta.record = send_rec;
+        send_meta.width = conn.width;
+        send_meta.width_type = conn.width_type;
+        send_meta.array_size = recv_meta.array_size;
+
+        gen.bus_plan.topModulePlan.input.push_back(send_rec);
+        gen.top.send_inputs.push_back(send_meta);
+      }
+    }
+  }
+
+  // External outputs (Eo) -> comb (MBus)
+  for (const auto& conn : analysis.external_outputs) {
+    if (conn.receivers.empty()) continue;
+    for (const auto& recv : conn.receivers) {
+      int pid = recv.module ? recv.module->partition_id : -1;
+      auto& wp = ensure_worker_plan(pid, gen);
+      register_module(recv, wp, gen.top);
+      register_module(conn.driver, wp, gen.top);
+      int slices = slice_count_for_width(conn.width);
+      for (int i = 0; i < slices; ++i) {
+        SlotRecvRecord recv_rec;
+        recv_rec.portName = recv.port ? recv.port->name : conn.port_name;
+        recv_rec.slotId = wp.next_slot++;
+        recv_rec.bitOffset = i * 16;
+
+        SlotRecvMeta recv_meta;
+        recv_meta.record = recv_rec;
+        recv_meta.width = conn.width;
+        recv_meta.width_type = conn.width_type;
+        recv_meta.receiver_module = recv.module;
+        recv_meta.receiver_port = recv.port;
+        recv_meta.driver_module = conn.driver.module;
+        recv_meta.driver_port = conn.driver.port;
+        recv_meta.from_external = true;
+        recv_meta.array_size = conn.driver.port ? conn.driver.port->array_size : array_size_from_endpoint(recv, conn.width_type);
+
+        gen.bus_plan.simWorkerPlans[pid].loadRemoteCInputs.fromMBus.push_back(recv_rec);
+        wp.mbus_recvs.push_back(recv_meta);
+
+        SlotSendRecord send_rec;
+        send_rec.portName = conn.driver.port ? conn.driver.port->name : conn.port_name;
+        send_rec.bitOffset = i * 16;
+        send_rec.targetId = pid + 1;
+        send_rec.slotId = recv_rec.slotId;
+
+        SlotSendMeta send_meta;
+        send_meta.record = send_rec;
+        send_meta.width = conn.width;
+        send_meta.width_type = conn.width_type;
+        send_meta.driver_module = conn.driver.module;
+        send_meta.driver_port = conn.driver.port;
+        send_meta.from_external = true;
+        send_meta.array_size = recv_meta.array_size;
+
+        gen.bus_plan.topModulePlan.externalOutput.push_back(send_rec);
+        gen.top.send_external_outputs.push_back(send_meta);
+      }
+    }
+  }
+
+  // Remote S->C (SBus)
+  for (const auto& kv : analysis.partitions) {
+    int src_pid = kv.first;
+    for (const auto& conn : kv.second.remote_s_to_c) {
+      if (conn.receivers.empty()) continue;
+      const auto& recv = conn.receivers.front();
+      int dst_pid = recv.module ? recv.module->partition_id : -1;
+      auto& src_wp = ensure_worker_plan(src_pid, gen);
+      auto& dst_wp = ensure_worker_plan(dst_pid, gen);
+      register_module(conn.driver, src_wp, gen.top);
+      register_module(recv, dst_wp, gen.top);
+      int slices = slice_count_for_width(conn.width);
+      for (int i = 0; i < slices; ++i) {
+        SlotRecvRecord recv_rec;
+        recv_rec.portName = recv.port ? recv.port->name : conn.port_name;
+        recv_rec.slotId = dst_wp.next_slot++;
+        recv_rec.bitOffset = i * 16;
+
+        SlotRecvMeta recv_meta;
+        recv_meta.record = recv_rec;
+        recv_meta.width = conn.width;
+        recv_meta.width_type = conn.width_type;
+        recv_meta.driver_module = conn.driver.module;
+        recv_meta.driver_port = conn.driver.port;
+        recv_meta.receiver_module = recv.module;
+        recv_meta.receiver_port = recv.port;
+        recv_meta.via_sbus = true;
+        recv_meta.array_size = conn.driver.port ? conn.driver.port->array_size : array_size_from_endpoint(recv, conn.width_type);
+
+        gen.bus_plan.simWorkerPlans[dst_pid].loadRemoteCInputs.fromSBus.push_back(recv_rec);
+        dst_wp.sbus_recvs.push_back(recv_meta);
+
+        SlotSendRecord send_rec;
+        send_rec.portName = conn.driver.port ? conn.driver.port->name : conn.port_name;
+        send_rec.bitOffset = i * 16;
+        send_rec.targetId = dst_pid + 1;
+        send_rec.slotId = recv_rec.slotId;
+
+        SlotSendMeta send_meta;
+        send_meta.record = send_rec;
+        send_meta.width = conn.width;
+        send_meta.width_type = conn.width_type;
+        send_meta.driver_module = conn.driver.module;
+        send_meta.driver_port = conn.driver.port;
+        send_meta.array_size = recv_meta.array_size;
+
+        gen.bus_plan.simWorkerPlans[src_pid].sendRemoteSOutputs.push_back(send_rec);
+        src_wp.send_remote.push_back(send_meta);
+      }
+    }
+  }
+
+  // Top outputs (O) : comb -> top (MBus)
+  for (const auto& conn : analysis.top_outputs) {
+    if (gen.top.top_outputs.find(conn.port_name) == gen.top.top_outputs.end()) {
+      gen.top.top_outputs.emplace(conn.port_name, build_signal(conn, conn.driver));
+    }
+    SignalEndpoint receiver; // top
+    add_top_slot(conn.width, conn.width_type, conn.driver, receiver, false,
+                 gen.top.recv_outputs, gen.bus_plan.topModulePlan.output);
+    if (conn.driver.module) {
+      int pid = conn.driver.module->partition_id;
+      auto& wp = ensure_worker_plan(pid, gen);
+      register_module(conn.driver, wp, gen.top);
+      int slices = slice_count_for_width(conn.width);
+      for (int i = 0; i < slices; ++i) {
+        const int slot_id = gen.top.next_slot - slices + i;
+        SlotSendRecord send_rec;
+        send_rec.portName = conn.driver.port ? conn.driver.port->name : conn.port_name;
+        send_rec.bitOffset = i * 16;
+        send_rec.targetId = 0;
+        send_rec.slotId = slot_id;
+
+        SlotSendMeta send_meta;
+        send_meta.record = send_rec;
+        send_meta.width = conn.width;
+        send_meta.width_type = conn.width_type;
+        send_meta.driver_module = conn.driver.module;
+        send_meta.driver_port = conn.driver.port;
+        send_meta.array_size = conn.driver.port ? conn.driver.port->array_size : 0;
+
+        gen.bus_plan.simWorkerPlans[pid].sendRemoteCOutputs.push_back(send_rec);
+        wp.send_to_top.push_back(send_meta);
+      }
+    }
+  }
+
+  // External inputs (Ei) : comb -> external (MBus)
+  for (const auto& conn : analysis.external_inputs) {
+    SignalEndpoint receiver = conn.receivers.empty() ? SignalEndpoint{} : conn.receivers.front();
+    add_top_slot(conn.width, conn.width_type, conn.driver, receiver, true,
+                 gen.top.recv_external_inputs, gen.bus_plan.topModulePlan.externalInput);
+    if (conn.driver.module) {
+      int pid = conn.driver.module->partition_id;
+      auto& wp = ensure_worker_plan(pid, gen);
+      register_module(conn.driver, wp, gen.top);
+      register_module(receiver, wp, gen.top);
+      int slices = slice_count_for_width(conn.width);
+      for (int i = 0; i < slices; ++i) {
+        const int slot_id = gen.top.next_slot - slices + i;
+        SlotSendRecord send_rec;
+        send_rec.portName = conn.driver.port ? conn.driver.port->name : conn.port_name;
+        send_rec.bitOffset = i * 16;
+        send_rec.targetId = 0;
+        send_rec.slotId = slot_id;
+
+        SlotSendMeta send_meta;
+        send_meta.record = send_rec;
+        send_meta.width = conn.width;
+        send_meta.width_type = conn.width_type;
+        send_meta.driver_module = conn.driver.module;
+        send_meta.driver_port = conn.driver.port;
+        send_meta.to_external = true;
+        send_meta.array_size = conn.driver.port ? conn.driver.port->array_size : 0;
+
+        gen.bus_plan.simWorkerPlans[pid].sendRemoteCOutputs.push_back(send_rec);
+        wp.send_to_top.push_back(send_meta);
+      }
+    }
+  }
+
+  // Local C->S (copy)
+  for (const auto& kv : analysis.partitions) {
+    int pid = kv.first;
+    auto& wp = ensure_worker_plan(pid, gen);
+    for (const auto& conn : kv.second.local_c_to_s) {
+      if (conn.receivers.empty()) continue;
+      const auto& recv = conn.receivers.front();
+      register_module(conn.driver, wp, gen.top);
+      register_module(recv, wp, gen.top);
+
+      CopyRecord rec;
+      rec.portName = conn.port_name;
+      gen.bus_plan.simWorkerPlans[pid].loadSInputs.push_back(rec);
+
+      CopyMeta meta;
+      meta.record = rec;
+      meta.driver_module = conn.driver.module;
+      meta.driver_port = conn.driver.port;
+      meta.receiver_module = recv.module;
+      meta.receiver_port = recv.port;
+      meta.width = conn.width;
+      meta.width_type = conn.width_type;
+      meta.array_size = recv.port ? recv.port->array_size : 0;
+      wp.copy_cts.push_back(meta);
+    }
+  }
+
+  // Local S->C (copy)
+  for (const auto& kv : analysis.partitions) {
+    int pid = kv.first;
+    auto& wp = ensure_worker_plan(pid, gen);
+    for (const auto& conn : kv.second.local_s_to_c) {
+      if (conn.receivers.empty()) continue;
+      const auto& recv = conn.receivers.front();
+      register_module(conn.driver, wp, gen.top);
+      register_module(recv, wp, gen.top);
+
+      CopyRecord rec;
+      rec.portName = conn.port_name;
+      gen.bus_plan.simWorkerPlans[pid].loadLocalCInputs.push_back(rec);
+
+      CopyMeta meta;
+      meta.record = rec;
+      meta.driver_module = conn.driver.module;
+      meta.driver_port = conn.driver.port;
+      meta.receiver_module = recv.module;
+      meta.receiver_port = recv.port;
+      meta.width = conn.width;
+      meta.width_type = conn.width_type;
+      meta.array_size = recv.port ? recv.port->array_size : 0;
+      wp.copy_stc.push_back(meta);
+    }
+  }
+
+  // Sort plans/meta for stable output
+  sort_bus_plan(gen.bus_plan);
+  sort_meta(gen.top.send_inputs);
+  sort_meta(gen.top.send_external_outputs);
+  sort_meta(gen.top.recv_outputs);
+  sort_meta(gen.top.recv_external_inputs);
+  for (auto& kv : gen.workers) {
+    sort_meta(kv.second.mbus_recvs);
+    sort_meta(kv.second.sbus_recvs);
+    sort_meta(kv.second.send_to_top);
+    sort_meta(kv.second.send_remote);
+    std::sort(kv.second.copy_cts.begin(), kv.second.copy_cts.end(),
+              [](const CopyMeta& a, const CopyMeta& b) { return a.record.portName < b.record.portName; });
+    std::sort(kv.second.copy_stc.begin(), kv.second.copy_stc.end(),
+              [](const CopyMeta& a, const CopyMeta& b) { return a.record.portName < b.record.portName; });
+  }
+
+  return gen;
 }
 
 void write_includes(std::ostream& os, const std::set<std::string>& module_headers) {
@@ -228,12 +662,8 @@ void write_includes(std::ostream& os, const std::set<std::string>& module_header
 }
 
 std::string generate_top_header(const std::string& output_base,
-                                const AddressPlan& plan) {
-  const ModuleInfo* external_mod = plan.external_mod;
-  const auto& top_inputs = plan.top_inputs;
-  const auto& top_outputs = plan.top_outputs;
-  const size_t mbus_count = static_cast<size_t>(std::max(1, plan.mbus_endpoint_count));
-  const size_t sbus_count = static_cast<size_t>(std::max(1, plan.sbus_endpoint_count));
+                                const GenerationPlan& plan) {
+  const ModuleInfo* external_mod = plan.top.external;
   std::set<std::string> module_headers;
   if (external_mod) module_headers.insert(external_mod->header_path);
 
@@ -246,20 +676,19 @@ std::string generate_top_header(const std::string& output_base,
   std::string counts_guard = sanitize_guard(output_base + "_COUNTS");
   os << "#ifndef " << counts_guard << "\n";
   os << "#define " << counts_guard << "\n";
-  os << "inline constexpr size_t kCorvusGenMBusCount = " << mbus_count << ";\n";
-  os << "inline constexpr size_t kCorvusGenSBusCount = " << sbus_count << ";\n";
+  os << "inline constexpr size_t kCorvusGenMBusCount = " << static_cast<size_t>(plan.mbus_count) << ";\n";
+  os << "inline constexpr size_t kCorvusGenSBusCount = " << static_cast<size_t>(plan.sbus_count) << ";\n";
   os << "#endif\n\n";
 
-  std::string top_class = top_class_name(output_base);
-  std::string ext_class = external_mod ? external_mod->class_name : "";
+  const std::string top_class = top_class_name(output_base);
   os << "class " << top_class << " : public CorvusTopModule {\n";
   os << "public:\n";
   os << "  class TopPortsGen : public TopPorts {\n";
   os << "  public:\n";
-  for (const auto& kv : top_inputs) {
+  for (const auto& kv : plan.top.top_inputs) {
     os << "    " << cpp_type_from_signal(kv.second) << " " << kv.first << ";\n";
   }
-  for (const auto& kv : top_outputs) {
+  for (const auto& kv : plan.top.top_outputs) {
     os << "    " << cpp_type_from_signal(kv.second) << " " << kv.first << ";\n";
   }
   os << "  };\n\n";
@@ -279,23 +708,21 @@ std::string generate_top_header(const std::string& output_base,
 }
 
 std::string generate_top_cpp(const std::string& output_base,
-                             const AddressPlan& plan) {
-  const ModuleInfo* external_mod = plan.external_mod;
-  const auto& workers = plan.workers;
-  const RecvPlan& top_plan = plan.top_recv_plan;
-  const std::string top_class = top_class_name(output_base);
-  const std::string top_header_name = top_class + ".h";
+                             const GenerationPlan& plan) {
+  const ModuleInfo* external_mod = plan.top.external;
   std::set<std::string> module_headers;
   if (external_mod) module_headers.insert(external_mod->header_path);
-
   std::ostringstream os;
+  const std::string top_class = top_class_name(output_base);
+  const std::string top_header_name = top_class + ".h";
+
   os << "#include \"" << path_basename(top_header_name) << "\"\n";
   for (const auto& h : module_headers) {
     os << "#include \"" << h << "\"\n";
   }
   os << "\nnamespace corvus_generated {\n\n";
-  std::string ext_class = external_mod ? external_mod->class_name : "";
 
+  std::string ext_class = external_mod ? external_mod->class_name : "";
   os << top_class << "::" << top_class << "(CorvusTopSynctreeEndpoint* topSynctreeEndpoint,\n";
   os << "                                     std::vector<CorvusBusEndpoint*> mBusEndpoints)\n";
   os << "    : CorvusTopModule(topSynctreeEndpoint, std::move(mBusEndpoints)) {\n";
@@ -325,129 +752,119 @@ std::string generate_top_cpp(const std::string& output_base,
     os << "void " << top_class << "::deleteExternalModule() { eModule = nullptr; }\n";
   }
 
+  // sendIAndEOutput
   os << "void " << top_class << "::sendIAndEOutput() {\n";
   os << "  auto* ports = static_cast<" << top_class << "::TopPortsGen*>(topPorts);\n";
   os << "  (void)ports;\n";
-  bool has_downlinks = false;
-  for (const auto& kv : workers) {
-    for (const auto& sig : kv.second.recv_plan.signals) {
-      if (!sig.via_sbus) { has_downlinks = true; break; }
-    }
-    if (has_downlinks) break;
+  if (external_mod) {
+    os << "  auto* eHandle = static_cast<VerilatorModuleHandle<" << ext_class << ">*>(eModule);\n";
+    os << "  auto* ext = eHandle ? eHandle->mp : nullptr;\n";
+    os << "  (void)ext;\n";
+  } else {
+    os << "  (void)eModule;\n";
   }
-  if (has_downlinks) {
-    if (external_mod) {
-      os << "  auto* eHandle = static_cast<VerilatorModuleHandle<" << ext_class << ">*>(eModule);\n";
-      os << "  auto* ext = eHandle ? eHandle->mp : nullptr;\n";
-      os << "  (void)ext;\n";
-    } else {
-      os << "  (void)eModule;\n";
-    }
+  if (plan.top.send_inputs.empty() && plan.top.send_external_outputs.empty()) {
+    os << "  // No inputs or external outputs to send\n";
+  } else {
+    os << "  size_t mbus_rr = 0;\n";
     os << "  uint64_t payload = 0;\n";
     os << "  uint64_t slice_data = 0;\n";
-    for (const auto& kv : workers) {
-      const auto& wp = kv.second;
-      const auto& recv_plan = wp.recv_plan;
-      bool worker_has_downlink = false;
-      for (const auto& sig : recv_plan.signals) {
-        if (!sig.via_sbus) { worker_has_downlink = true; break; }
-      }
-      if (!worker_has_downlink) continue;
+    const auto emit_send_block = [&](const SlotSendMeta& meta) {
+      const auto& rec = meta.record;
+      const std::string src_expr = meta.from_external
+        ? (std::string("ext->") + (meta.driver_port ? meta.driver_port->name : rec.portName))
+        : (std::string("ports->") + rec.portName);
+      const std::string guard = meta.from_external ? "ext" : "ports";
       os << "  {\n";
-      os << "    const uint32_t targetId = " << (wp.pid + 1) << ";\n";
-      for (const auto& slot : recv_plan.signals) {
-        if (slot.via_sbus) continue;
-        const auto& sig = slot.sig;
-        const std::string data_mask_hex = "0xFFFFULL";
-        const std::string src_expr = slot.from_external
-          ? (std::string("ext->") + (sig.driver.port ? sig.driver.port->name : sig.name))
-          : (std::string("ports->") + sig.name);
-        os << "    {\n";
-        os << "      // slot " << sig.name << " (base slotId=" << (slot.slots.empty() ? 0 : slot.slots.front().slot_id) << ")\n";
-        if (sig.width_type == PortWidthType::VL_W) {
-          for (const auto& slice : slot.slots) {
-            os << "      {\n";
-            os << "        int bitOffset = " << slice.bit_offset << ";\n";
-            os << "        int word = bitOffset / 32;\n";
-            os << "        int wordBit = bitOffset % 32;\n";
-            os << "        slice_data = static_cast<uint64_t>(" << src_expr << "[word]);\n";
-            os << "        slice_data >>= wordBit;\n";
-            os << "        slice_data &= " << data_mask_hex << ";\n";
-            os << "        payload = static_cast<uint64_t>(" << slice.slot_id << ");\n";
-            os << "        payload |= (slice_data << 32);\n";
-            os << "        mBusEndpoints[0]->send(targetId, payload);\n";
-            os << "      }\n";
-          }
-        } else {
-          os << "      uint64_t src_val = static_cast<uint64_t>(" << src_expr << ");\n";
-          for (const auto& slice : slot.slots) {
-            os << "      {\n";
-            os << "        int bitOffset = " << slice.bit_offset << ";\n";
-            os << "        slice_data = (src_val >> bitOffset) & " << data_mask_hex << ";\n";
-            os << "        payload = static_cast<uint64_t>(" << slice.slot_id << ");\n";
-            os << "        payload |= (slice_data << 32);\n";
-            os << "        mBusEndpoints[0]->send(targetId, payload);\n";
-            os << "      }\n";
-          }
-        }
+      os << "    const uint32_t targetId = " << rec.targetId << ";\n";
+      os << "    CorvusBusEndpoint* ep = mBusEndpoints[mbus_rr % mBusEndpoints.size()];\n";
+      os << "    ++mbus_rr;\n";
+      if (meta.width_type == PortWidthType::VL_W) {
+        os << "    int bitOffset = " << rec.bitOffset << ";\n";
+        os << "    int word = bitOffset / 32;\n";
+        os << "    int wordBit = bitOffset % 32;\n";
+        os << "    if (" << guard << ") {\n";
+        os << "      slice_data = static_cast<uint64_t>(" << src_expr << "[word]);\n";
+        os << "      slice_data >>= wordBit;\n";
+        os << "      slice_data &= 0xFFFFULL;\n";
+        os << "      payload = static_cast<uint64_t>(" << rec.slotId << ");\n";
+        os << "      payload |= (slice_data << 32);\n";
+        os << "      ep->send(targetId, payload);\n";
         os << "    }\n";
+      } else {
+        os << "    uint64_t src_val = static_cast<uint64_t>(" << src_expr << ");\n";
+        os << "    slice_data = (src_val >> " << rec.bitOffset << ") & 0xFFFFULL;\n";
+        os << "    payload = static_cast<uint64_t>(" << rec.slotId << ");\n";
+        os << "    payload |= (slice_data << 32);\n";
+        os << "    ep->send(targetId, payload);\n";
       }
       os << "  }\n";
+    };
+    for (const auto& meta : plan.top.send_inputs) {
+      emit_send_block(meta);
+    }
+    for (const auto& meta : plan.top.send_external_outputs) {
+      emit_send_block(meta);
     }
   }
   os << "}\n\n";
 
+  // loadOAndEInput
   os << "void " << top_class << "::loadOAndEInput() {\n";
   os << "  auto* ports = static_cast<" << top_class << "::TopPortsGen*>(topPorts);\n";
   os << "  (void)ports;\n";
-  if (!top_plan.signals.empty()) {
-    const std::string slot_mask_hex = "0xFFFFFFFFULL";
-    if (external_mod) {
-      os << "  auto* eHandle = static_cast<VerilatorModuleHandle<" << ext_class << ">*>(eModule);\n";
-      os << "  auto* ext = eHandle ? eHandle->mp : nullptr;\n";
-      os << "  (void)ext;\n";
-    } else {
-      os << "  (void)eModule;\n";
-    }
-    os << "  const uint64_t kSlotMask = " << slot_mask_hex << ";\n";
+  if (external_mod) {
+    os << "  auto* eHandle = static_cast<VerilatorModuleHandle<" << ext_class << ">*>(eModule);\n";
+    os << "  auto* ext = eHandle ? eHandle->mp : nullptr;\n";
+    os << "  (void)ext;\n";
+  } else {
+    os << "  (void)eModule;\n";
+  }
+  if (plan.top.recv_outputs.empty() && plan.top.recv_external_inputs.empty()) {
+    os << "  // No outputs or external inputs to load\n";
+  } else {
+    os << "  const uint64_t kSlotMask = 0xFFFFFFFFULL;\n";
     os << "  for (size_t ep = 0; ep < mBusEndpoints.size(); ++ep) {\n";
     os << "    int cnt = mBusEndpoints[ep]->bufferCnt();\n";
     os << "    for (int i = 0; i < cnt; ++i) {\n";
     os << "      uint64_t payload = mBusEndpoints[ep]->recv();\n";
     os << "      uint32_t slotId = static_cast<uint32_t>(payload & kSlotMask);\n";
     os << "      switch (slotId) {\n";
-    for (const auto& slot : top_plan.signals) {
-      const auto& sig = slot.sig;
-      const std::string data_mask_hex = "0xFFFFULL";
-      const std::string dst_expr = slot.to_external
-        ? (std::string("ext->") + (sig.receiver.port ? sig.receiver.port->name : sig.name))
-        : (std::string("ports->") + sig.name);
-      const std::string dst_guard = slot.to_external ? "ext" : "ports";
-        for (const auto& slice : slot.slots) {
-          os << "      case " << slice.slot_id << ": {\n";
-          os << "        uint64_t data = (payload >> 32) & " << data_mask_hex << ";\n";
-          os << "        int bitOffset = " << slice.bit_offset << ";\n";
-        if (sig.width_type == PortWidthType::VL_W) {
-          os << "        int word = bitOffset / 32;\n";
-          os << "        int wordBit = bitOffset % 32;\n";
-          os << "        if (" << dst_guard << ") {\n";
-          os << "          uint32_t lowMask = static_cast<uint32_t>(" << data_mask_hex << " << wordBit);\n";
-          os << "          uint32_t lowBits = static_cast<uint32_t>(data << wordBit);\n";
-          os << "          " << dst_expr << "[word] = (" << dst_expr << "[word] & ~lowMask) | lowBits;\n";
-          os << "        }\n";
-        } else if (sig.width <= 16) {
-          os << "        if (" << dst_guard << ") {\n";
-          os << "          " << dst_expr << " = static_cast<" << cpp_type_from_signal(sig) << ">(data);\n";
-          os << "        }\n";
-        } else {
-          os << "        uint64_t cur = static_cast<uint64_t>(" << dst_expr << ");\n";
-          os << "        uint64_t mask = (" << data_mask_hex << ") << bitOffset;\n";
-          os << "        cur = (cur & ~mask) | ((data & " << data_mask_hex << ") << bitOffset);\n";
-          os << "        " << dst_expr << " = static_cast<" << cpp_type_from_signal(sig) << ">(cur);\n";
-        }
-          os << "        break;\n";
-          os << "      }\n";
+    auto emit_recv_case = [&](const SlotRecvMeta& meta) {
+      const auto& rec = meta.record;
+      const std::string dst_expr = meta.to_external
+        ? (std::string("ext->") + (meta.receiver_port ? meta.receiver_port->name : rec.portName))
+        : (std::string("ports->") + rec.portName);
+      const std::string guard = meta.to_external ? "ext" : "ports";
+      os << "      case " << rec.slotId << ": {\n";
+      os << "        uint64_t data = (payload >> 32) & 0xFFFFULL;\n";
+      os << "        int bitOffset = " << rec.bitOffset << ";\n";
+      if (meta.width_type == PortWidthType::VL_W) {
+        os << "        int word = bitOffset / 32;\n";
+        os << "        int wordBit = bitOffset % 32;\n";
+        os << "        if (" << guard << ") {\n";
+        os << "          uint32_t lowMask = static_cast<uint32_t>(0xFFFFULL << wordBit);\n";
+        os << "          uint32_t lowBits = static_cast<uint32_t>(data << wordBit);\n";
+        os << "          " << dst_expr << "[word] = (" << dst_expr << "[word] & ~lowMask) | lowBits;\n";
+        os << "        }\n";
+      } else if (meta.width <= 16) {
+        os << "        if (" << guard << ") {\n";
+        os << "          " << dst_expr << " = static_cast<" << cpp_type_from_meta(meta) << ">(data);\n";
+        os << "        }\n";
+      } else {
+        os << "        uint64_t cur = static_cast<uint64_t>(" << dst_expr << ");\n";
+        os << "        uint64_t mask = (0xFFFFULL) << bitOffset;\n";
+        os << "        cur = (cur & ~mask) | ((data & 0xFFFFULL) << bitOffset);\n";
+        os << "        " << dst_expr << " = static_cast<" << cpp_type_from_meta(meta) << ">(cur);\n";
       }
+      os << "        break;\n";
+      os << "      }\n";
+    };
+    for (const auto& meta : plan.top.recv_outputs) {
+      emit_recv_case(meta);
+    }
+    for (const auto& meta : plan.top.recv_external_inputs) {
+      emit_recv_case(meta);
     }
     os << "      default: break;\n";
     os << "      }\n";
@@ -461,8 +878,8 @@ std::string generate_top_cpp(const std::string& output_base,
 }
 
 std::string generate_worker_header(const std::string& output_base,
-                                   const WorkerPlan& wp,
-                                   const AddressPlan& plan,
+                                   const WorkerGenPlan& wp,
+                                   const GenerationPlan& plan,
                                    const std::set<std::string>& module_headers) {
   std::ostringstream os;
   std::string guard = sanitize_guard(output_base + "_WORKER_P" + std::to_string(wp.pid));
@@ -471,20 +888,18 @@ std::string generate_worker_header(const std::string& output_base,
   os << "#define " << guard << "\n\n";
   write_includes(os, module_headers);
   os << "namespace corvus_generated {\n\n";
-  const size_t mbus_count = static_cast<size_t>(std::max(1, plan.mbus_endpoint_count));
-  const size_t sbus_count = static_cast<size_t>(std::max(1, plan.sbus_endpoint_count));
   os << "#ifndef " << counts_guard << "\n";
   os << "#define " << counts_guard << "\n";
-  os << "inline constexpr size_t kCorvusGenMBusCount = " << mbus_count << ";\n";
-  os << "inline constexpr size_t kCorvusGenSBusCount = " << sbus_count << ";\n";
+  os << "inline constexpr size_t kCorvusGenMBusCount = " << static_cast<size_t>(plan.mbus_count) << ";\n";
+  os << "inline constexpr size_t kCorvusGenSBusCount = " << static_cast<size_t>(plan.sbus_count) << ";\n";
   os << "#endif\n\n";
 
   std::string worker_class = worker_class_name(output_base, wp.pid);
   os << "class " << worker_class << " : public CorvusSimWorker {\n";
   os << "public:\n";
   os << "  " << worker_class << "(CorvusSimWorkerSynctreeEndpoint* simWorkerSynctreeEndpoint,\n";
-  os << "                                     std::vector<CorvusBusEndpoint*> mBusEndpoints,\n";
-  os << "                                     std::vector<CorvusBusEndpoint*> sBusEndpoints);\n";
+  os << "                       std::vector<CorvusBusEndpoint*> mBusEndpoints,\n";
+  os << "                       std::vector<CorvusBusEndpoint*> sBusEndpoints);\n";
   os << "protected:\n";
   os << "  void createSimModules() override;\n";
   os << "  void deleteSimModules() override;\n";
@@ -500,19 +915,17 @@ std::string generate_worker_header(const std::string& output_base,
 }
 
 std::string generate_worker_cpp(const std::string& output_base,
-                                const WorkerPlan& wp,
-                                const AddressPlan& plan,
-                                const std::map<int, std::vector<const RecvSignal*>>& send_to_top,
-                                const std::map<int, std::vector<const RecvSignal*>>& remote_send_map,
+                                const WorkerGenPlan& wp,
+                                const GenerationPlan& plan,
                                 const std::set<std::string>& module_headers) {
   std::ostringstream os;
+  (void)plan;
   const std::string worker_class = worker_class_name(output_base, wp.pid);
   os << "#include \"" << path_basename(worker_class + ".h") << "\"\n";
   for (const auto& h : module_headers) {
     os << "#include \"" << h << "\"\n";
   }
   os << "\nnamespace corvus_generated {\n\n";
-  (void)plan;
 
   os << worker_class << "::" << worker_class << "(\n";
   os << "    CorvusSimWorkerSynctreeEndpoint* simWorkerSynctreeEndpoint,\n";
@@ -542,98 +955,79 @@ std::string generate_worker_cpp(const std::string& output_base,
   os << "  auto* comb = combHandle ? combHandle->mp : nullptr;\n";
   os << "  if (!comb) return;\n";
   os << "  const uint64_t kSlotMask = 0xFFFFFFFFULL;\n";
-  bool has_downlink_slots = false;
-  bool has_remote_slots = false;
-  for (const auto& sig : wp.recv_plan.signals) {
-    if (sig.via_sbus) {
-      has_remote_slots = true;
-    } else {
-      has_downlink_slots = true;
-    }
-  }
-  if (!has_downlink_slots && !has_remote_slots) {
+  if (wp.mbus_recvs.empty() && wp.sbus_recvs.empty()) {
     os << "  (void)kSlotMask;\n";
   }
-  if (has_downlink_slots) {
+  if (!wp.mbus_recvs.empty()) {
     os << "  for (size_t ep = 0; ep < mBusEndpoints.size(); ++ep) {\n";
     os << "    int cnt = mBusEndpoints[ep]->bufferCnt();\n";
     os << "    for (int i = 0; i < cnt; ++i) {\n";
     os << "      uint64_t payload = mBusEndpoints[ep]->recv();\n";
     os << "      uint32_t slotId = static_cast<uint32_t>(payload & kSlotMask);\n";
     os << "      switch (slotId) {\n";
-    for (const auto& slot : wp.recv_plan.signals) {
-      if (slot.via_sbus) continue;
-      const auto& sig = slot.sig;
-      const std::string data_mask_hex = "0xFFFFULL";
-      const std::string dst_expr = std::string("comb->") + (sig.receiver.port ? sig.receiver.port->name : sig.name);
-      for (const auto& slice : slot.slots) {
-        os << "      case " << slice.slot_id << ": {\n";
-        os << "        uint64_t data = (payload >> 32) & " << data_mask_hex << ";\n";
-        os << "        int bitOffset = " << slice.bit_offset << ";\n";
-        if (sig.width_type == PortWidthType::VL_W) {
-          os << "        int word = bitOffset / 32;\n";
-          os << "        int wordBit = bitOffset % 32;\n";
-          os << "        uint32_t lowMask = static_cast<uint32_t>(" << data_mask_hex << " << wordBit);\n";
-          os << "        uint32_t lowBits = static_cast<uint32_t>(data << wordBit);\n";
-          os << "        " << dst_expr << "[word] = (" << dst_expr << "[word] & ~lowMask) | lowBits;\n";
-        } else if (sig.width <= 16) {
-          os << "        " << dst_expr << " = static_cast<" << cpp_type_from_signal(sig) << ">(data);\n";
-        } else {
-          os << "        uint64_t cur = static_cast<uint64_t>(" << dst_expr << ");\n";
-          os << "        uint64_t mask = (" << data_mask_hex << ") << bitOffset;\n";
-          os << "        cur = (cur & ~mask) | ((data & " << data_mask_hex << ") << bitOffset);\n";
-          os << "        " << dst_expr << " = static_cast<" << cpp_type_from_signal(sig) << ">(cur);\n";
-        }
-        os << "        break;\n";
-        os << "      }\n";
+    for (const auto& meta : wp.mbus_recvs) {
+      const auto& rec = meta.record;
+      const std::string dst_expr = std::string("comb->") + (meta.receiver_port ? meta.receiver_port->name : rec.portName);
+      os << "      case " << rec.slotId << ": {\n";
+      os << "        uint64_t data = (payload >> 32) & 0xFFFFULL;\n";
+      os << "        int bitOffset = " << rec.bitOffset << ";\n";
+      if (meta.width_type == PortWidthType::VL_W) {
+        os << "        int word = bitOffset / 32;\n";
+        os << "        int wordBit = bitOffset % 32;\n";
+        os << "        uint32_t lowMask = static_cast<uint32_t>(0xFFFFULL << wordBit);\n";
+        os << "        uint32_t lowBits = static_cast<uint32_t>(data << wordBit);\n";
+        os << "        " << dst_expr << "[word] = (" << dst_expr << "[word] & ~lowMask) | lowBits;\n";
+      } else if (meta.width <= 16) {
+        os << "        " << dst_expr << " = static_cast<" << cpp_type_from_meta(meta) << ">(data);\n";
+      } else {
+        os << "        uint64_t cur = static_cast<uint64_t>(" << dst_expr << ");\n";
+        os << "        uint64_t mask = (0xFFFFULL) << bitOffset;\n";
+        os << "        cur = (cur & ~mask) | ((data & 0xFFFFULL) << bitOffset);\n";
+        os << "        " << dst_expr << " = static_cast<" << cpp_type_from_meta(meta) << ">(cur);\n";
       }
+      os << "        break;\n";
+      os << "      }\n";
     }
     os << "      default: break;\n";
     os << "      }\n";
     os << "    }\n";
     os << "  }\n";
   }
-
-  if (has_remote_slots) {
+  if (!wp.sbus_recvs.empty()) {
     os << "  for (size_t ep = 0; ep < sBusEndpoints.size(); ++ep) {\n";
     os << "    int cnt = sBusEndpoints[ep]->bufferCnt();\n";
     os << "    for (int i = 0; i < cnt; ++i) {\n";
     os << "      uint64_t payload = sBusEndpoints[ep]->recv();\n";
     os << "      uint32_t slotId = static_cast<uint32_t>(payload & kSlotMask);\n";
     os << "      switch (slotId) {\n";
-    for (const auto& slot : wp.recv_plan.signals) {
-      if (!slot.via_sbus) continue;
-      const auto& sig = slot.sig;
-      const std::string data_mask_hex = "0xFFFFULL";
-      const std::string dst_expr = std::string("comb->") + (sig.receiver.port ? sig.receiver.port->name : sig.name);
-      for (const auto& slice : slot.slots) {
-        os << "      case " << slice.slot_id << ": {\n";
-        os << "        uint64_t data = (payload >> 32) & " << data_mask_hex << ";\n";
-        os << "        int bitOffset = " << slice.bit_offset << ";\n";
-        if (sig.width_type == PortWidthType::VL_W) {
-          os << "        int word = bitOffset / 32;\n";
-          os << "        int wordBit = bitOffset % 32;\n";
-          os << "        uint32_t lowMask = static_cast<uint32_t>(" << data_mask_hex << " << wordBit);\n";
-          os << "        uint32_t lowBits = static_cast<uint32_t>(data << wordBit);\n";
-          os << "        " << dst_expr << "[word] = (" << dst_expr << "[word] & ~lowMask) | lowBits;\n";
-        } else if (sig.width <= 16) {
-          os << "        " << dst_expr << " = static_cast<" << cpp_type_from_signal(sig) << ">(data);\n";
-        } else {
-          os << "        uint64_t cur = static_cast<uint64_t>(" << dst_expr << ");\n";
-          os << "        uint64_t mask = (" << data_mask_hex << ") << bitOffset;\n";
-          os << "        cur = (cur & ~mask) | ((data & " << data_mask_hex << ") << bitOffset);\n";
-          os << "        " << dst_expr << " = static_cast<" << cpp_type_from_signal(sig) << ">(cur);\n";
-        }
-        os << "        break;\n";
-        os << "      }\n";
+    for (const auto& meta : wp.sbus_recvs) {
+      const auto& rec = meta.record;
+      const std::string dst_expr = std::string("comb->") + (meta.receiver_port ? meta.receiver_port->name : rec.portName);
+      os << "      case " << rec.slotId << ": {\n";
+      os << "        uint64_t data = (payload >> 32) & 0xFFFFULL;\n";
+      os << "        int bitOffset = " << rec.bitOffset << ";\n";
+      if (meta.width_type == PortWidthType::VL_W) {
+        os << "        int word = bitOffset / 32;\n";
+        os << "        int wordBit = bitOffset % 32;\n";
+        os << "        uint32_t lowMask = static_cast<uint32_t>(0xFFFFULL << wordBit);\n";
+        os << "        uint32_t lowBits = static_cast<uint32_t>(data << wordBit);\n";
+        os << "        " << dst_expr << "[word] = (" << dst_expr << "[word] & ~lowMask) | lowBits;\n";
+      } else if (meta.width <= 16) {
+        os << "        " << dst_expr << " = static_cast<" << cpp_type_from_meta(meta) << ">(data);\n";
+      } else {
+        os << "        uint64_t cur = static_cast<uint64_t>(" << dst_expr << ");\n";
+        os << "        uint64_t mask = (0xFFFFULL) << bitOffset;\n";
+        os << "        cur = (cur & ~mask) | ((data & 0xFFFFULL) << bitOffset);\n";
+        os << "        " << dst_expr << " = static_cast<" << cpp_type_from_meta(meta) << ">(cur);\n";
       }
+      os << "        break;\n";
+      os << "      }\n";
     }
     os << "      default: break;\n";
     os << "      }\n";
     os << "    }\n";
     os << "  }\n";
   }
-
   os << "}\n\n";
 
   // sendRemoteCOutputs
@@ -641,69 +1035,57 @@ std::string generate_worker_cpp(const std::string& output_base,
   os << "  auto* combHandle = static_cast<VerilatorModuleHandle<" << wp.comb->class_name << ">* >(cModule);\n";
   os << "  auto* comb = combHandle ? combHandle->mp : nullptr;\n";
   os << "  if (!comb) return;\n";
-  os << "  uint64_t payload = 0;\n";
-  os << "  uint64_t slice_data = 0;\n";
-  auto send_it = send_to_top.find(wp.pid);
-  if (send_it == send_to_top.end() || send_it->second.empty()) {
-    os << "  (void)payload; (void)slice_data;\n";
-    os << "}\n\n";
+  if (wp.send_to_top.empty()) {
+    os << "  (void)comb;\n";
   } else {
-    for (const auto* slot : send_it->second) {
-      const auto& sig = slot->sig;
-      std::string src = "comb->" + (sig.driver.port ? sig.driver.port->name : sig.name);
-      const std::string data_mask_hex = "0xFFFFULL";
+    os << "  size_t mbus_rr = 0;\n";
+    os << "  uint64_t payload = 0;\n";
+    os << "  uint64_t slice_data = 0;\n";
+    for (const auto& meta : wp.send_to_top) {
+      const auto& rec = meta.record;
+      std::string src = std::string("comb->") + (meta.driver_port ? meta.driver_port->name : rec.portName);
       os << "  {\n";
-      os << "    // slot " << sig.name << " (base slotId=" << (slot->slots.empty() ? 0 : slot->slots.front().slot_id) << ")\n";
-      if (sig.width_type == PortWidthType::VL_W) {
-        for (const auto& slice : slot->slots) {
-          os << "    {\n";
-          os << "      int bitOffset = " << slice.bit_offset << ";\n";
-          os << "      int word = bitOffset / 32;\n";
-          os << "      int wordBit = bitOffset % 32;\n";
-          os << "      slice_data = static_cast<uint64_t>(" << src << "[word]);\n";
-          os << "      slice_data >>= wordBit;\n";
-          os << "      slice_data &= " << data_mask_hex << ";\n";
-          os << "      payload = static_cast<uint64_t>(" << slice.slot_id << ");\n";
-          os << "      payload |= (slice_data << 32);\n";
-          os << "      mBusEndpoints[0]->send(0, payload);\n";
-          os << "    }\n";
-        }
+      os << "    // slot " << rec.slotId << "\n";
+      os << "    CorvusBusEndpoint* ep = mBusEndpoints[mbus_rr % mBusEndpoints.size()];\n";
+      os << "    ++mbus_rr;\n";
+      if (meta.width_type == PortWidthType::VL_W) {
+        os << "    int bitOffset = " << rec.bitOffset << ";\n";
+        os << "    int word = bitOffset / 32;\n";
+        os << "    int wordBit = bitOffset % 32;\n";
+        os << "    slice_data = static_cast<uint64_t>(" << src << "[word]);\n";
+        os << "    slice_data >>= wordBit;\n";
+        os << "    slice_data &= 0xFFFFULL;\n";
+        os << "    payload = static_cast<uint64_t>(" << rec.slotId << ");\n";
+        os << "    payload |= (slice_data << 32);\n";
+        os << "    ep->send(0, payload);\n";
       } else {
         os << "    uint64_t src_val = static_cast<uint64_t>(" << src << ");\n";
-        for (const auto& slice : slot->slots) {
-          os << "    {\n";
-          os << "      int bitOffset = " << slice.bit_offset << ";\n";
-          os << "      slice_data = (src_val >> bitOffset) & " << data_mask_hex << ";\n";
-          os << "      payload = static_cast<uint64_t>(" << slice.slot_id << ");\n";
-          os << "      payload |= (slice_data << 32);\n";
-          os << "      mBusEndpoints[0]->send(0, payload);\n";
-          os << "    }\n";
-        }
+        os << "    slice_data = (src_val >> " << rec.bitOffset << ") & 0xFFFFULL;\n";
+        os << "    payload = static_cast<uint64_t>(" << rec.slotId << ");\n";
+        os << "    payload |= (slice_data << 32);\n";
+        os << "    ep->send(0, payload);\n";
       }
       os << "  }\n";
     }
-    os << "}\n\n";
   }
+  os << "}\n\n";
 
-  // loadSInputs (local C->S)
+  // loadSInputs (C->S local copy)
   os << "void " << worker_class << "::loadSInputs() {\n";
   os << "  auto* combHandle = static_cast<VerilatorModuleHandle<" << wp.comb->class_name << ">* >(cModule);\n";
   os << "  auto* seqHandle = static_cast<VerilatorModuleHandle<" << wp.seq->class_name << ">* >(sModule);\n";
   os << "  auto* comb = combHandle ? combHandle->mp : nullptr;\n";
   os << "  auto* seq = seqHandle ? seqHandle->mp : nullptr;\n";
   os << "  if (!comb || !seq) return;\n";
-  for (const auto& conn : wp.local_cts) {
-    if (!conn.driver.port) continue;
-    std::string src = "comb->" + conn.driver.port->name;
-    for (const auto& recv : conn.receivers) {
-      if (!recv.port) continue;
-      std::string dst = "seq->" + recv.port->name;
-      if (conn.width_type == PortWidthType::VL_W) {
-        int words = recv.port ? recv.port->array_size : conn.driver.port->array_size;
-        os << "  for (int i = 0; i < " << words << "; ++i) { " << dst << "[i] = " << src << "[i]; }\n";
-      } else {
-        os << "  " << dst << " = " << src << ";\n";
-      }
+  for (const auto& meta : wp.copy_cts) {
+    if (!meta.driver_port || !meta.receiver_port) continue;
+    std::string src = "comb->" + meta.driver_port->name;
+    std::string dst = "seq->" + meta.receiver_port->name;
+    if (meta.width_type == PortWidthType::VL_W) {
+      int words = meta.receiver_port->array_size;
+      os << "  for (int i = 0; i < " << words << "; ++i) { " << dst << "[i] = " << src << "[i]; }\n";
+    } else {
+      os << "  " << dst << " = " << src << ";\n";
     }
   }
   os << "}\n\n";
@@ -713,70 +1095,57 @@ std::string generate_worker_cpp(const std::string& output_base,
   os << "  auto* seqHandle = static_cast<VerilatorModuleHandle<" << wp.seq->class_name << ">* >(sModule);\n";
   os << "  auto* seq = seqHandle ? seqHandle->mp : nullptr;\n";
   os << "  if (!seq) return;\n";
-  os << "  uint64_t payload = 0;\n";
-  os << "  uint64_t slice_data = 0;\n";
-  auto remote_it = remote_send_map.find(wp.pid);
-  if (remote_it == remote_send_map.end() || remote_it->second.empty()) {
-    os << "  (void)payload; (void)slice_data;\n";
-    os << "}\n\n";
+  if (wp.send_remote.empty()) {
+    os << "  (void)seq;\n";
   } else {
-    for (const auto* slot : remote_it->second) {
-      const auto& sig = slot->sig;
-      std::string src = "seq->" + (sig.driver.port ? sig.driver.port->name : sig.name);
-      const std::string data_mask_hex = "0xFFFFULL";
+    os << "  size_t sbus_rr = 0;\n";
+    os << "  uint64_t payload = 0;\n";
+    os << "  uint64_t slice_data = 0;\n";
+    for (const auto& meta : wp.send_remote) {
+      const auto& rec = meta.record;
+      std::string src = "seq->" + (meta.driver_port ? meta.driver_port->name : rec.portName);
       os << "  {\n";
-      os << "    // slot " << sig.name << " -> P" << sig.receiver_pid << " (base slotId=" << (slot->slots.empty() ? 0 : slot->slots.front().slot_id) << ")\n";
-      os << "    const uint32_t targetId = " << (sig.receiver_pid + 1) << ";\n";
-      if (sig.width_type == PortWidthType::VL_W) {
-        for (const auto& slice : slot->slots) {
-          os << "    {\n";
-          os << "      int bitOffset = " << slice.bit_offset << ";\n";
-          os << "      int word = bitOffset / 32;\n";
-          os << "      int wordBit = bitOffset % 32;\n";
-          os << "      slice_data = static_cast<uint64_t>(" << src << "[word]);\n";
-          os << "      slice_data >>= wordBit;\n";
-          os << "      slice_data &= " << data_mask_hex << ";\n";
-          os << "      payload = static_cast<uint64_t>(" << slice.slot_id << ");\n";
-          os << "      payload |= (slice_data << 32);\n";
-          os << "      sBusEndpoints[0]->send(targetId, payload);\n";
-          os << "    }\n";
-        }
+      os << "    const uint32_t targetId = " << rec.targetId << ";\n";
+      os << "    CorvusBusEndpoint* ep = sBusEndpoints[sbus_rr % sBusEndpoints.size()];\n";
+      os << "    ++sbus_rr;\n";
+      if (meta.width_type == PortWidthType::VL_W) {
+        os << "    int bitOffset = " << rec.bitOffset << ";\n";
+        os << "    int word = bitOffset / 32;\n";
+        os << "    int wordBit = bitOffset % 32;\n";
+        os << "    slice_data = static_cast<uint64_t>(" << src << "[word]);\n";
+        os << "    slice_data >>= wordBit;\n";
+        os << "    slice_data &= 0xFFFFULL;\n";
+        os << "    payload = static_cast<uint64_t>(" << rec.slotId << ");\n";
+        os << "    payload |= (slice_data << 32);\n";
+        os << "    ep->send(targetId, payload);\n";
       } else {
         os << "    uint64_t src_val = static_cast<uint64_t>(" << src << ");\n";
-        for (const auto& slice : slot->slots) {
-          os << "    {\n";
-          os << "      int bitOffset = " << slice.bit_offset << ";\n";
-          os << "      slice_data = (src_val >> bitOffset) & " << data_mask_hex << ";\n";
-          os << "      payload = static_cast<uint64_t>(" << slice.slot_id << ");\n";
-          os << "      payload |= (slice_data << 32);\n";
-          os << "      sBusEndpoints[0]->send(targetId, payload);\n";
-          os << "    }\n";
-        }
+        os << "    slice_data = (src_val >> " << rec.bitOffset << ") & 0xFFFFULL;\n";
+        os << "    payload = static_cast<uint64_t>(" << rec.slotId << ");\n";
+        os << "    payload |= (slice_data << 32);\n";
+        os << "    ep->send(targetId, payload);\n";
       }
       os << "  }\n";
     }
-    os << "}\n\n";
   }
+  os << "}\n\n";
 
-  // loadLocalCInputs (S -> C feedback)
+  // loadLocalCInputs (S->C local copy)
   os << "void " << worker_class << "::loadLocalCInputs() {\n";
   os << "  auto* combHandle = static_cast<VerilatorModuleHandle<" << wp.comb->class_name << ">* >(cModule);\n";
   os << "  auto* seqHandle = static_cast<VerilatorModuleHandle<" << wp.seq->class_name << ">* >(sModule);\n";
   os << "  auto* comb = combHandle ? combHandle->mp : nullptr;\n";
   os << "  auto* seq = seqHandle ? seqHandle->mp : nullptr;\n";
   os << "  if (!comb || !seq) return;\n";
-  for (const auto& conn : wp.local_stc) {
-    if (!conn.driver.port) continue;
-    std::string src = "seq->" + conn.driver.port->name;
-    for (const auto& recv : conn.receivers) {
-      if (!recv.port) continue;
-      std::string dst = "comb->" + recv.port->name;
-      if (conn.width_type == PortWidthType::VL_W) {
-        int words = recv.port ? recv.port->array_size : conn.driver.port->array_size;
-        os << "  for (int i = 0; i < " << words << "; ++i) { " << dst << "[i] = " << src << "[i]; }\n";
-      } else {
-        os << "  " << dst << " = " << src << ";\n";
-      }
+  for (const auto& meta : wp.copy_stc) {
+    if (!meta.driver_port || !meta.receiver_port) continue;
+    std::string src = "seq->" + meta.driver_port->name;
+    std::string dst = "comb->" + meta.receiver_port->name;
+    if (meta.width_type == PortWidthType::VL_W) {
+      int words = meta.receiver_port->array_size;
+      os << "  for (int i = 0; i < " << words << "; ++i) { " << dst << "[i] = " << src << "[i]; }\n";
+    } else {
+      os << "  " << dst << " = " << src << ";\n";
     }
   }
   os << "}\n\n";
@@ -787,215 +1156,38 @@ std::string generate_worker_cpp(const std::string& output_base,
 
 } // namespace
 
-void CorvusGenerator::SlotAddressSpace::assign_slots_impl(std::vector<RecvSignal>& slots) {
-  for (auto& sig : slots) {
-    const int base = next_slot_;
-    sig.slots = build_slot_records(sig.sig, base);
-    next_slot_ += static_cast<int>(sig.slots.size());
-  }
-}
-
-void CorvusGenerator::SlotAddressSpace::assign_slots(std::vector<RecvSignal>& slots) {
-  assign_slots_impl(slots);
-}
-
-int CorvusGenerator::SlotAddressSpace::slot_bits() const {
-  return slot_bits_for_count(static_cast<size_t>(next_slot_));
-}
-
-CorvusGenerator::AddressPlan CorvusGenerator::build_address_plan(const ConnectionAnalysis& analysis) const {
-  AddressPlan plan;
-  plan.top_recv_plan.pid = -1;
-  auto get_worker = [&](int pid) -> WorkerPlan& {
-    auto it = plan.workers.find(pid);
-    if (it == plan.workers.end()) {
-      WorkerPlan wp;
-      wp.pid = pid;
-      wp.recv_plan.pid = pid;
-      it = plan.workers.emplace(pid, std::move(wp)).first;
-    }
-    if (it->second.pid == -1) it->second.pid = pid;
-    if (it->second.recv_plan.pid == -1) it->second.recv_plan.pid = pid;
-    return it->second;
-  };
-
-  auto add_signal = [&](WorkerPlan& wp,
-                        const ClassifiedConnection& conn,
-                        const SignalEndpoint& recv,
-                        bool from_external,
-                        bool via_sbus) {
-    RecvSignal sig;
-    sig.sig = build_signal(conn, recv);
-    sig.from_external = from_external;
-    sig.via_sbus = via_sbus;
-    wp.recv_plan.signals.push_back(std::move(sig));
-  };
-
-  // Collect partition-local signals and register modules
-  for (const auto& kv : analysis.partitions) {
-    WorkerPlan& wp = get_worker(kv.first);
-    for (const auto& conn : kv.second.local_c_to_s) {
-      wp.local_cts.push_back(conn);
-      register_module(conn.driver, wp, plan.external_mod);
-      if (!conn.receivers.empty()) {
-        register_module(conn.receivers[0], wp, plan.external_mod);
-      }
-    }
-    for (const auto& conn : kv.second.local_s_to_c) {
-      wp.local_stc.push_back(conn);
-      register_module(conn.driver, wp, plan.external_mod);
-      if (!conn.receivers.empty()) {
-        register_module(conn.receivers[0], wp, plan.external_mod);
-      }
-    }
-    for (const auto& conn : kv.second.remote_s_to_c) {
-      if (conn.receivers.empty()) continue;
-      int target_pid = conn.receivers[0].module ? conn.receivers[0].module->partition_id : -1;
-      WorkerPlan& target = get_worker(target_pid);
-      register_module(conn.receivers[0], target, plan.external_mod);
-      register_module(conn.driver, wp, plan.external_mod);
-      add_signal(target, conn, conn.receivers[0], false, true);
-    }
-  }
-
-  // Top inputs (I)
-  for (const auto& conn : analysis.top_inputs) {
-    if (!conn.receivers.empty()) {
-      plan.top_inputs.emplace(conn.port_name, build_signal(conn, conn.receivers[0]));
-    }
-    for (const auto& recv : conn.receivers) {
-      int pid = recv.module ? recv.module->partition_id : -1;
-      WorkerPlan& wp = get_worker(pid);
-      register_module(recv, wp, plan.external_mod);
-      add_signal(wp, conn, recv, false, false);
-    }
-  }
-
-  // External outputs (Eo) -> comb
-  for (const auto& conn : analysis.external_outputs) {
-    if (conn.driver.module && conn.driver.module->type == ModuleType::EXTERNAL) {
-      plan.external_mod = conn.driver.module;
-    } else {
-      register_module(conn.driver, get_worker(conn.driver.module ? conn.driver.module->partition_id : -1), plan.external_mod);
-    }
-    for (const auto& recv : conn.receivers) {
-      int pid = recv.module ? recv.module->partition_id : -1;
-      WorkerPlan& wp = get_worker(pid);
-      register_module(recv, wp, plan.external_mod);
-      add_signal(wp, conn, recv, true, false);
-    }
-  }
-
-  // Top outputs (O) : comb -> top
-  for (const auto& conn : analysis.top_outputs) {
-    if (plan.top_outputs.find(conn.port_name) == plan.top_outputs.end()) {
-      plan.top_outputs.emplace(conn.port_name, build_signal(conn, conn.driver));
-    }
-    RecvSignal slot;
-    slot.sig = build_signal(conn, conn.driver);
-    slot.to_external = false;
-    plan.top_recv_plan.signals.push_back(std::move(slot));
-    if (conn.driver.module) {
-      register_module(conn.driver, get_worker(conn.driver.module->partition_id), plan.external_mod);
-    }
-  }
-
-  // External inputs (Ei) : comb -> external
-  for (const auto& conn : analysis.external_inputs) {
-    if (!conn.receivers.empty() && conn.receivers[0].module) {
-      plan.external_mod = conn.receivers[0].module;
-    }
-    SignalEndpoint receiver = conn.receivers.empty() ? SignalEndpoint{} : conn.receivers[0];
-    RecvSignal slot;
-    slot.sig = build_signal(conn, receiver);
-    slot.to_external = true;
-    plan.top_recv_plan.signals.push_back(std::move(slot));
-    if (conn.driver.module) {
-      register_module(conn.driver, get_worker(conn.driver.module->partition_id), plan.external_mod);
-    }
-  }
-
-  auto sort_signals = [](std::vector<RecvSignal>& signals) {
-    std::sort(signals.begin(), signals.end(), [](const RecvSignal& a, const RecvSignal& b) {
-      if (a.via_sbus != b.via_sbus) return a.via_sbus < b.via_sbus;
-      if (a.to_external != b.to_external) return a.to_external < b.to_external;
-      if (a.from_external != b.from_external) return a.from_external < b.from_external;
-      if (a.sig.name != b.sig.name) return a.sig.name < b.sig.name;
-      return a.sig.driver_pid < b.sig.driver_pid;
-    });
-  };
-
-  // Sort and assign slot metadata
-  for (auto& kv : plan.workers) {
-    auto& wp = kv.second;
-    sort_signals(wp.recv_plan.signals);
-    SlotAddressSpace recv_space;
-    recv_space.assign_slots(wp.recv_plan.signals);
-    wp.recv_plan.slot_bits = recv_space.slot_bits();
-
-    bool has_mbus_slots = false;
-    bool has_sbus_slots = false;
-    for (const auto& sig : wp.recv_plan.signals) {
-      if (sig.via_sbus) {
-        has_sbus_slots = true;
-      } else {
-        has_mbus_slots = true;
-      }
-    }
-    if (has_mbus_slots) {
-      plan.mbus_endpoint_count = std::max(plan.mbus_endpoint_count, recv_space.required_bus_count());
-    }
-    if (has_sbus_slots) {
-      plan.sbus_endpoint_count = std::max(plan.sbus_endpoint_count, recv_space.required_bus_count());
-    }
-  }
-
-  sort_signals(plan.top_recv_plan.signals);
-  SlotAddressSpace top_space;
-  top_space.assign_slots(plan.top_recv_plan.signals);
-  plan.top_recv_plan.slot_bits = top_space.slot_bits();
-  if (!plan.top_recv_plan.signals.empty()) {
-    plan.mbus_endpoint_count = std::max(plan.mbus_endpoint_count, top_space.required_bus_count());
-  }
-
-  return plan;
-}
-
-bool CorvusGenerator::write_plan_json(const ConnectionAnalysis& analysis,
-                                      const AddressPlan& plan,
-                                      const std::string& output_base) const {
-  const std::string json_path = output_base + "_corvus.json";
+bool CorvusGenerator::write_connection_analysis_json(const ConnectionAnalysis& analysis,
+                                                     const std::string& output_base) const {
+  const std::string json_path = output_base + "_connection_analysis.json";
   std::ofstream ofs(json_path);
   if (!ofs.is_open()) {
     std::cerr << "Failed to open output: " << json_path << std::endl;
     return false;
   }
 
-  auto write_slots = [&](const RecvSignal& sig) {
-    ofs << "[";
-    for (size_t i = 0; i < sig.slots.size(); ++i) {
-      const auto& slice = sig.slots[i];
-      ofs << "{ \"slotId\": " << slice.slot_id << ", \"bitOffset\": " << slice.bit_offset << "}";
-      if (i + 1 < sig.slots.size()) ofs << ", ";
-    }
-    ofs << "]";
+  auto write_endpoint = [&](const SignalEndpoint& ep) {
+    ofs << "{ \"module\": \"" << (ep.module ? ep.module->instance_name : "null")
+        << "\", \"module_type\": \"" << (ep.module ? ep.module->get_type_str() : "null")
+        << "\", \"partition\": " << (ep.module ? ep.module->partition_id : -1)
+        << ", \"port\": \"" << (ep.port ? ep.port->name : "null") << "\" }";
   };
 
-  auto write_recv_plan = [&](const RecvPlan& rp) {
-    ofs << "{ \"pid\": " << rp.pid << ", \"signals\": [";
-    for (size_t i = 0; i < rp.signals.size(); ++i) {
-      const auto& sig = rp.signals[i];
-      ofs << "\n      { \"name\": \"" << sig.sig.name << "\", \"width\": " << sig.sig.width
-          << ", \"width_type\": " << static_cast<int>(sig.sig.width_type)
-          << ", \"from_external\": " << (sig.from_external ? "true" : "false")
-          << ", \"to_external\": " << (sig.to_external ? "true" : "false")
-          << ", \"via_sbus\": " << (sig.via_sbus ? "true" : "false")
-          << ", \"slots\": ";
-      write_slots(sig);
-      ofs << " }";
-      if (i + 1 < rp.signals.size()) ofs << ",";
+  auto write_connections = [&](const std::vector<ClassifiedConnection>& conns) {
+    ofs << "[";
+    for (size_t i = 0; i < conns.size(); ++i) {
+      const auto& c = conns[i];
+      ofs << "{ \"port\": \"" << c.port_name << "\", \"width\": " << c.width
+          << ", \"width_type\": \"" << width_type_to_string(c.width_type) << "\", \"driver\": ";
+      write_endpoint(c.driver);
+      ofs << ", \"receivers\": [";
+      for (size_t j = 0; j < c.receivers.size(); ++j) {
+        write_endpoint(c.receivers[j]);
+        if (j + 1 < c.receivers.size()) ofs << ", ";
+      }
+      ofs << "] }";
+      if (i + 1 < conns.size()) ofs << ", ";
     }
-    ofs << (rp.signals.empty() ? "" : "\n    ") << "] }";
+    ofs << "]";
   };
 
   ofs << "{\n";
@@ -1006,17 +1198,119 @@ bool CorvusGenerator::write_plan_json(const ConnectionAnalysis& analysis,
   }
   ofs << "],\n";
 
-  ofs << "  \"recv_plans\": {";
-  ofs << "\n    \"" << plan.top_recv_plan.pid << "\": ";
-  write_recv_plan(plan.top_recv_plan);
-  for (auto it = plan.workers.begin(); it != plan.workers.end(); ++it) {
-    ofs << ",\n    \"" << it->first << "\": ";
-    write_recv_plan(it->second.recv_plan);
+  ofs << "  \"top_inputs\": ";
+  write_connections(analysis.top_inputs);
+  ofs << ",\n  \"top_outputs\": ";
+  write_connections(analysis.top_outputs);
+  ofs << ",\n  \"external_inputs\": ";
+  write_connections(analysis.external_inputs);
+  ofs << ",\n  \"external_outputs\": ";
+  write_connections(analysis.external_outputs);
+  ofs << ",\n  \"partitions\": {\n";
+  for (auto it = analysis.partitions.begin(); it != analysis.partitions.end(); ++it) {
+    ofs << "    \"" << it->first << "\": {";
+    ofs << "\"local_c_to_s\": ";
+    write_connections(it->second.local_c_to_s);
+    ofs << ", \"local_s_to_c\": ";
+    write_connections(it->second.local_s_to_c);
+    ofs << ", \"remote_s_to_c\": ";
+    write_connections(it->second.remote_s_to_c);
+    ofs << "}";
+    auto next_it = it;
+    ++next_it;
+    if (next_it != analysis.partitions.end()) ofs << ",";
+    ofs << "\n";
   }
-  ofs << "\n  }\n";
+  ofs << "  }\n";
   ofs << "}\n";
   ofs.close();
-  std::cout << "Corvus generator wrote: " << json_path << std::endl;
+  std::cout << "Connection analysis wrote: " << json_path << std::endl;
+  return true;
+}
+
+bool CorvusGenerator::write_bus_plan_json(const CorvusBusPlan& plan,
+                                          const std::vector<std::string>& warnings,
+                                          const std::string& output_base) const {
+  const std::string json_path = output_base + "_corvus_bus_plan.json";
+  std::ofstream ofs(json_path);
+  if (!ofs.is_open()) {
+    std::cerr << "Failed to open output: " << json_path << std::endl;
+    return false;
+  }
+
+  auto write_recv_vec = [&](const std::vector<SlotRecvRecord>& v) {
+    ofs << "[";
+    for (size_t i = 0; i < v.size(); ++i) {
+      ofs << "{ \"portName\": \"" << v[i].portName << "\", \"slotId\": " << v[i].slotId
+          << ", \"bitOffset\": " << v[i].bitOffset << "}";
+      if (i + 1 < v.size()) ofs << ", ";
+    }
+    ofs << "]";
+  };
+  auto write_send_vec = [&](const std::vector<SlotSendRecord>& v) {
+    ofs << "[";
+    for (size_t i = 0; i < v.size(); ++i) {
+      ofs << "{ \"portName\": \"" << v[i].portName << "\", \"bitOffset\": " << v[i].bitOffset
+          << ", \"targetId\": " << v[i].targetId << ", \"slotId\": " << v[i].slotId << "}";
+      if (i + 1 < v.size()) ofs << ", ";
+    }
+    ofs << "]";
+  };
+  auto write_copy_vec = [&](const std::vector<CopyRecord>& v) {
+    ofs << "[";
+    for (size_t i = 0; i < v.size(); ++i) {
+      ofs << "{ \"portName\": \"" << v[i].portName << "\"}";
+      if (i + 1 < v.size()) ofs << ", ";
+    }
+    ofs << "]";
+  };
+
+  ofs << "{\n";
+  ofs << "  \"warnings\": [";
+  for (size_t i = 0; i < warnings.size(); ++i) {
+    ofs << "\"" << warnings[i] << "\"";
+    if (i + 1 < warnings.size()) ofs << ", ";
+  }
+  ofs << "],\n";
+
+  ofs << "  \"topModulePlan\": {\n";
+  ofs << "    \"input\": ";
+  write_send_vec(plan.topModulePlan.input);
+  ofs << ",\n    \"output\": ";
+  write_recv_vec(plan.topModulePlan.output);
+  ofs << ",\n    \"externalInput\": ";
+  write_recv_vec(plan.topModulePlan.externalInput);
+  ofs << ",\n    \"externalOutput\": ";
+  write_send_vec(plan.topModulePlan.externalOutput);
+  ofs << "\n  },\n";
+
+  ofs << "  \"simWorkerPlans\": {\n";
+  for (auto it = plan.simWorkerPlans.begin(); it != plan.simWorkerPlans.end(); ++it) {
+    ofs << "    \"" << it->first << "\": {\n";
+    ofs << "      \"loadRemoteCInputs\": {\n";
+    ofs << "        \"fromMBus\": ";
+    write_recv_vec(it->second.loadRemoteCInputs.fromMBus);
+    ofs << ",\n        \"fromSBus\": ";
+    write_recv_vec(it->second.loadRemoteCInputs.fromSBus);
+    ofs << "\n      },\n";
+    ofs << "      \"sendRemoteCOutputs\": ";
+    write_send_vec(it->second.sendRemoteCOutputs);
+    ofs << ",\n      \"loadSInputs\": ";
+    write_copy_vec(it->second.loadSInputs);
+    ofs << ",\n      \"sendRemoteSOutputs\": ";
+    write_send_vec(it->second.sendRemoteSOutputs);
+    ofs << ",\n      \"loadLocalCInputs\": ";
+    write_copy_vec(it->second.loadLocalCInputs);
+    ofs << "\n    }";
+    auto next_it = it;
+    ++next_it;
+    if (next_it != plan.simWorkerPlans.end()) ofs << ",";
+    ofs << "\n";
+  }
+  ofs << "  }\n";
+  ofs << "}\n";
+  ofs.close();
+  std::cout << "Corvus bus plan wrote: " << json_path << std::endl;
   return true;
 }
 
@@ -1026,38 +1320,15 @@ bool CorvusGenerator::generate(const ConnectionAnalysis& analysis,
                                int sbus_count) {
   std::string stage = "init";
   try {
-    stage = "build_address_plan";
-    AddressPlan plan = build_address_plan(analysis);
-    plan.mbus_endpoint_count = std::max(1, plan.mbus_endpoint_count);
-    plan.sbus_endpoint_count = std::max(1, plan.sbus_endpoint_count);
-    if (mbus_count > 0 && mbus_count < plan.mbus_endpoint_count) {
-      std::cerr << "Requested mbus-count " << mbus_count << " < required endpoints " << plan.mbus_endpoint_count << "\n";
+    stage = "build_generation_plan";
+    GenerationPlan plan = build_generation_plan(analysis, mbus_count, sbus_count);
+    stage = "write_connection_analysis";
+    if (!write_connection_analysis_json(analysis, output_base)) {
       return false;
     }
-    if (sbus_count > 0 && sbus_count < plan.sbus_endpoint_count) {
-      std::cerr << "Requested sbus-count " << sbus_count << " < required endpoints " << plan.sbus_endpoint_count << "\n";
+    stage = "write_bus_plan";
+    if (!write_bus_plan_json(plan.bus_plan, plan.warnings, output_base)) {
       return false;
-    }
-
-    stage = "write_json";
-    if (!write_plan_json(analysis, plan, output_base)) {
-      return false;
-    }
-
-    std::map<int, std::vector<const RecvSignal*>> send_to_top;
-    for (const auto& sig : plan.top_recv_plan.signals) {
-      if (sig.sig.driver_pid >= 0) {
-        send_to_top[sig.sig.driver_pid].push_back(&sig);
-      }
-    }
-
-    std::map<int, std::vector<const RecvSignal*>> remote_send_map;
-    for (const auto& kv : plan.workers) {
-      for (const auto& sig : kv.second.recv_plan.signals) {
-        if (sig.via_sbus && sig.sig.driver_pid >= 0) {
-          remote_send_map[sig.sig.driver_pid].push_back(&sig);
-        }
-      }
     }
 
     stage = "write_top_worker";
@@ -1110,7 +1381,7 @@ bool CorvusGenerator::generate(const ConnectionAnalysis& analysis,
           std::cerr << "Failed to open output: " << w_cpp_path << std::endl;
           return false;
         }
-        wc << generate_worker_cpp(output_base, wp, plan, send_to_top, remote_send_map, worker_headers_set);
+        wc << generate_worker_cpp(output_base, wp, plan, worker_headers_set);
       }
     }
 

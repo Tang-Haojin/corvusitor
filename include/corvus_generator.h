@@ -10,53 +10,44 @@
 // CorvusTargetGenerator: emits connection analysis in a corvus-oriented format.
 class CorvusGenerator : public CodeGenerator::TargetGenerator {
 public:
-  struct SignalRef {
-    std::string name;
-    int width = 0;
-    PortWidthType width_type = PortWidthType::VL_8;
-    int array_size = 0;
-    SignalEndpoint driver;
-    SignalEndpoint receiver;
-    int driver_pid = -1;
-    int receiver_pid = -1;
+  struct SlotRecvRecord {
+    std::string portName;
+    int slotId = 0;
+    int bitOffset = 0;
   };
 
-  struct SlotRecord {
-    int slot_id = 0;
-    int bit_offset = 0;
+  struct SlotSendRecord {
+    std::string portName;
+    int bitOffset = 0;
+    int targetId = 0;
+    int slotId = 0;
   };
 
-  struct RecvSignal {
-    SignalRef sig;
-    bool from_external = false;
-    bool to_external = false;
-    bool via_sbus = false;
-    std::vector<SlotRecord> slots;
+  struct CopyRecord {
+    std::string portName;
   };
 
-  struct RecvPlan {
-    int pid = -1; // -1 reserved for Top
-    std::vector<RecvSignal> signals;
-    int slot_bits = 32;
+  struct TopModulePlan {
+    std::vector<SlotSendRecord> input;
+    std::vector<SlotRecvRecord> output;
+    std::vector<SlotRecvRecord> externalInput;
+    std::vector<SlotSendRecord> externalOutput;
   };
 
-  struct WorkerPlan {
-    int pid = -1;
-    const ModuleInfo* comb = nullptr;
-    const ModuleInfo* seq = nullptr;
-    RecvPlan recv_plan;
-    std::vector<ClassifiedConnection> local_cts;
-    std::vector<ClassifiedConnection> local_stc;
+  struct SimWorkerPlan {
+    struct LoadRemoteCInputs {
+      std::vector<SlotRecvRecord> fromMBus;
+      std::vector<SlotRecvRecord> fromSBus;
+    } loadRemoteCInputs;
+    std::vector<SlotSendRecord> sendRemoteCOutputs;
+    std::vector<CopyRecord> loadSInputs;
+    std::vector<SlotSendRecord> sendRemoteSOutputs;
+    std::vector<CopyRecord> loadLocalCInputs;
   };
 
-  struct AddressPlan {
-    const ModuleInfo* external_mod = nullptr;
-    std::map<std::string, SignalRef> top_inputs;
-    std::map<std::string, SignalRef> top_outputs;
-    RecvPlan top_recv_plan;
-    std::map<int, WorkerPlan> workers;
-    int mbus_endpoint_count = 1;
-    int sbus_endpoint_count = 1;
+  struct CorvusBusPlan {
+    TopModulePlan topModulePlan;
+    std::map<int, SimWorkerPlan> simWorkerPlans;
   };
 
   bool generate(const ConnectionAnalysis& analysis,
@@ -65,25 +56,11 @@ public:
                 int sbus_count) override;
 
 private:
-  class SlotAddressSpace {
-  public:
-    SlotAddressSpace() = default;
-    void assign_slots(std::vector<RecvSignal>& slots);
-    int total_slots() const { return next_slot_; }
-    int slot_bits() const;
-    int required_bus_count() const { return max_bus_index_ + 1; }
-
-  private:
-    void assign_slots_impl(std::vector<RecvSignal>& slots);
-
-    int next_slot_ = 0;
-    int max_bus_index_ = 0;
-  };
-
-  AddressPlan build_address_plan(const ConnectionAnalysis& analysis) const;
-  bool write_plan_json(const ConnectionAnalysis& analysis,
-                       const AddressPlan& plan,
-                       const std::string& output_base) const;
+  bool write_connection_analysis_json(const ConnectionAnalysis& analysis,
+                                      const std::string& output_base) const;
+  bool write_bus_plan_json(const CorvusBusPlan& plan,
+                           const std::vector<std::string>& warnings,
+                           const std::string& output_base) const;
 };
 
 #endif // CORVUS_GENERATOR_H

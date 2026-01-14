@@ -154,15 +154,18 @@ int main() {
     return 1;
   }
 
-  std::ifstream ifs(base + "_corvus.json");
-  if (!ifs.is_open()) {
+  std::ifstream analysis_file(base + "_connection_analysis.json");
+  std::ifstream plan(base + "_corvus_bus_plan.json");
+  if (!analysis_file.is_open() || !plan.is_open()) {
     std::cerr << "Missing output json\n";
     return 1;
   }
-  std::string json_content((std::istreambuf_iterator<char>(ifs)),
+  std::string analysis_content((std::istreambuf_iterator<char>(analysis_file)),
+                               std::istreambuf_iterator<char>());
+  std::string plan_content((std::istreambuf_iterator<char>(plan)),
                            std::istreambuf_iterator<char>());
-  if (json_content.find("recv_plans") == std::string::npos ||
-      json_content.find("\"-1\"") == std::string::npos) {
+  if (analysis_content.find("top_inputs") == std::string::npos ||
+      plan_content.find("topModulePlan") == std::string::npos) {
     std::cerr << "Unexpected JSON content\n";
     return 1;
   }

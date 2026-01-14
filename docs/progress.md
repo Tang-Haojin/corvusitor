@@ -5,7 +5,7 @@
 - 路由策略：以接收端需求驱动的路由规划，远端 S→C 路由按 targetId=分区+1。
 - 约束校验：连接发现/分类时遇到多 driver、位宽不匹配、非法跨分区或 external 连接会直接抛错终止（不再仅打印 warning）。
 - 测试覆盖：`test_corvus_generator`（JSON/头文件烟测）、`test_corvus_slots`（跨分区 S→C）、`test_corvus_yuquan`（YuQuan 集成路径，需先生成 verilator 工件）、`test_corvus_yuquan_cmodel`（YuQuan CModel 集成）。
-- 数据结构精简：Top 及每个 worker 仅保留一张 `RecvPlan`（pid 为 key，Top 约定 pid=-1），每个 `RecvPlan` 记录信号名/位宽/`slots`。`slots` 为 `{slotId, bitOffset}` 列表（16-bit 片对齐），可选标记 `from_external`/`to_external`/`via_sbus` 仅用于发送端生成，不再输出 slot_bits/driverPid/bus 等冗余字段，`YuQuan_corvus.json` 仅包含 `recv_plans`+`warnings`。
+- 数据结构精简：生成独立的 `connection_analysis` 与 `corvus_bus_plan` JSON；`CorvusBusPlan` 采用 SlotRecvRecord/SlotSendRecord/CopyRecord 记录 slot 编址与拷贝计划（16-bit 对齐，单表覆盖 MBus/SBus，Top 侧共享一张表），不重复落位宽等冗余信息。
 
 来自旧文档的补充
 - 输入/约束与分类规则已经汇总到 `docs/architecture.md`。
@@ -48,3 +48,39 @@
 		2. 在多条 sBusEndpoints 间简单轮询发送，分散负载。
 	- `SimWorker::loadLocalCInputs()`：
 		1. 依据硬编码映射执行 Si→Ci 内存拷贝（不经总线），宽信号按片拷贝。
+
+# Corvus 代码生成方案指南
+
+规划以下层次化数据结构，本着不重复存储数据的原则，例如位宽之类的信息不应该写入到 plan 中
+
+- SlotRecvRecord 数据结构，记录通过MBus或者SBus接收的变量
+	- portName：将要写入的端口名称
+	- slotId：关联的 slotId
+	- bitOffset：slotData将要写入的偏移
+- SlotSendRecord 数据结构，记录通过MBus/SBus发送的变量
+	- portName：将要读取的端口名称
+	- bitOffset：从读取端口提取的开始偏移
+	- targetId：目的地
+	- slotId：目的地slotId
+- CopyRecord 数据结构，记录本地内存拷贝的变量
+	- portName：需要拷贝的端口名称
+- TopModulePlan 数据结构
+	- input：类型为 SlotSendRecord 数组
+	- output：类型为 SlotRecvRecord 数组
+	- externalInput：类型为 SlotRecvRecord 数组
+	- externalOutput：类型为 SlotSendRecord 数组
+- SimWorkerPlan 数据结构
+	- loadRemoteCInputs
+		- fromMBus：SlotRecvRecord 数组
+		- fromSBus：SlotRecvRecord 数组
+	- sendRemoteCOutputs：SlotSendRecord 数组
+	- loadSInputs：CopyRecord 数组
+	- sendRemoteSOutputs：SlotSendRecord 数组
+	- loadLocalCInputs: CopyRecord 数组
+- CorvusBusPlan 数据结构
+	- topModulePlan：类型为 TopModulePlan
+	- simWorkerPlans：类型为 SimWorkerPlan 数组
+
+代码生成时，由 ConnectionAnalysis 生成 CorvusBusPlan，再由 CorvusBusPlan 生成总线操作代码
+
+生成 connectionAnalysis 和 corvusBusPlan json 格式供核查。

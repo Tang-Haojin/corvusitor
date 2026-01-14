@@ -6,7 +6,7 @@
 - 模块发现与解析：`ModuleDiscoveryManager` + `ModuleParser` 识别 comb/seq/external 模块并提取端口信息（仅 Verilator 实现；发现 VCS/Modelsim 会抛错提示未支持）。
 - 连接分析：`ConnectionBuilder::analyze` 将端口分组并分类为 corvus 语义，返回 `ConnectionAnalysis`。
 - 目标生成：`CodeGenerator` 封装上述步骤并接受 `mbus_count`/`sbus_count` 配置，将 `ConnectionAnalysis` 交给目标生成器（当前为 `CorvusGenerator`）。
-- 产出：`CorvusGenerator` 生成 `<output>_corvus.json`（分析快照），以及与类名一致的生成文件：`C<output>TopModuleGen.{h,cpp}`/`C<output>SimWorkerGenP*.{h,cpp}`（聚合头 `C<output>CorvusGen.h`），类名前缀携带用户 output；CModel 入口由 `CorvusCModelGenerator` 生成 `C<output>CModelGen.h`。
+- 产出：`CorvusGenerator` 生成 `<output>_connection_analysis.json`（分析快照）与 `<output>_corvus_bus_plan.json`（总线/拷贝计划），以及与类名一致的生成文件：`C<output>TopModuleGen.{h,cpp}`/`C<output>SimWorkerGenP*.{h,cpp}`（聚合头 `C<output>CorvusGen.h`），类名前缀携带用户 output；CModel 入口由 `CorvusCModelGenerator` 生成 `C<output>CModelGen.h`。
 
 ## 输入约束（来自仿真输出）
 - 模块类型：`corvus_comb_P*`、`corvus_seq_P*`、可选 `corvus_external`。comb/seq 数量相同（N），external 最多 1 个（已在代码中校验）。

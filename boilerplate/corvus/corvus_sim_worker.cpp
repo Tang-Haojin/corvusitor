@@ -75,14 +75,14 @@ bool CorvusSimWorker::isTopSyncFlagRaised() {
     } else {
         // Unexpected flag value, possibly due to reset
         // 严重错误，终止模拟
-        std::cerr << "[CorvusSimWorker] Fatal error: unexpected top sync flag value="
-                  << static_cast<int>(synctreeEndpoint->getTopSyncFlag().getValue())
-                  << " (expected " << static_cast<int>(prevTopSyncFlag.getValue())
-                  << " or " << static_cast<int>(prevTopSyncFlag.nextValue()) << ")"
-                  << " in SimWorker(" << (workerName.empty() ? "unnamed" : workerName) << ")"
-                  << std::endl;
-        stop();
-        return false;
+        while(1){
+            std::cerr << "[CorvusSimWorker] Fatal error: unexpected top sync flag value="
+                    << static_cast<int>(synctreeEndpoint->getTopSyncFlag().getValue())
+                    << " (expected " << static_cast<int>(prevTopSyncFlag.getValue())
+                    << " or " << static_cast<int>(prevTopSyncFlag.nextValue()) << ")"
+                    << " in SimWorker(" << (workerName.empty() ? "unnamed" : workerName) << ")"
+                    << std::endl;
+        }
     }
 }
 

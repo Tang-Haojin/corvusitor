@@ -13,8 +13,8 @@ class CorvusCModelIdealizedBusEndpoint;
 
 // Idealized bus that routes payloads between endpoints without timing behavior.
 // All endpoints are created up front in the constructor. Payload delivery writes
-// into target buffers with a lock; reads assume a single reader and are
-// lock-free.
+// into target buffers with a lock; reads also take the same lock to avoid
+// multithreaded deque corruption.
 class CorvusCModelIdealizedBus {
 public:
     explicit CorvusCModelIdealizedBus(uint32_t endpointCount);
@@ -34,8 +34,7 @@ private:
 class CorvusCModelIdealizedBusEndpoint : public CorvusBusEndpoint {
 public:
     // Each endpoint owns a receive buffer; send routes via bus, recv pops or
-    // returns 0 if empty. Buffer writes are locked; reads are assumed single
-    // threaded and do not lock.
+    // returns 0 if empty. Both writes and reads are locked to avoid races.
     CorvusCModelIdealizedBusEndpoint(CorvusCModelIdealizedBus* bus, uint32_t endpointId);
     ~CorvusCModelIdealizedBusEndpoint() override = default;
     CorvusCModelIdealizedBusEndpoint(const CorvusCModelIdealizedBusEndpoint&) = delete;
@@ -53,7 +52,7 @@ private:
     CorvusCModelIdealizedBus* bus;
     uint32_t id;
     std::deque<uint64_t> buffer;
-    std::mutex bufferMutex;
+    mutable std::mutex bufferMutex;
 };
 
 #endif // CORVUS_CMODEL_IDEALIZED_BUS_H

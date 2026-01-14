@@ -44,6 +44,7 @@ void CorvusCModelIdealizedBusEndpoint::send(uint32_t targetId, uint64_t payload)
 }
 
 uint64_t CorvusCModelIdealizedBusEndpoint::recv() {
+    std::lock_guard<std::mutex> lock(bufferMutex);
     if (buffer.empty()) {
         return 0;
     }
@@ -53,6 +54,7 @@ uint64_t CorvusCModelIdealizedBusEndpoint::recv() {
 }
 
 int CorvusCModelIdealizedBusEndpoint::bufferCnt() const {
+    std::lock_guard<std::mutex> lock(bufferMutex);
     return static_cast<int>(buffer.size());
 }
 

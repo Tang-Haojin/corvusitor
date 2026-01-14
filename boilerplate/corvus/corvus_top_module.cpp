@@ -62,11 +62,12 @@ bool CorvusTopModule::allSimWorkerSFinish() {
         return true;
     } else {
         // 丢步，严重错误
-        std::cerr << "[CorvusTopModule] Fatal error: SimWorker S finish flag jumped from "
-                  << static_cast<int>(prevSFinishFlag.getValue()) << " to "
-                  << static_cast<int>(synctreeEndpoint->getSimWorkerSFinishFlag().getValue())
-                  << std::endl;
-        exit(1);
+        while(1) {
+            std::cerr << "[CorvusTopModule] Fatal error: SimWorker S finish flag jumped from "
+                    << static_cast<int>(prevSFinishFlag.getValue()) << " to "
+                    << static_cast<int>(synctreeEndpoint->getSimWorkerSFinishFlag().getValue())
+                    << std::endl;
+        }
     }
 }
 

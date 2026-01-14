@@ -1,10 +1,12 @@
 #ifndef CORVUS_CMODEL_SYNC_TREE_H
 #define CORVUS_CMODEL_SYNC_TREE_H
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <mutex>
 #include <vector>
+#include <atomic>
 
 #include "corvus_synctree_endpoint.h"
 
@@ -25,11 +27,13 @@ public:
     uint32_t getSimWorkerCount() const;
 
 private:
+    static CorvusSynctreeEndpoint::ValueFlag loadFlag(const std::atomic<uint8_t>& flag);
+    static void storeFlag(std::atomic<uint8_t>& dst, CorvusSynctreeEndpoint::ValueFlag flag);
     friend class CorvusCModelTopSynctreeEndpoint;
     friend class CorvusCModelSimWorkerSynctreeEndpoint;
-    CorvusSynctreeEndpoint::ValueFlag simWorkerStartFlag;
-    CorvusSynctreeEndpoint::ValueFlag topSyncFlag;
-    std::vector<CorvusSynctreeEndpoint::ValueFlag> simWorkerSFinishFlag;
+    std::atomic<uint8_t> simWorkerStartFlag;
+    std::atomic<uint8_t> topSyncFlag;
+    std::vector<std::atomic<uint8_t>> simWorkerSFinishFlag;
     std::shared_ptr<CorvusCModelTopSynctreeEndpoint> topEndpoint;
     std::vector<std::shared_ptr<CorvusCModelSimWorkerSynctreeEndpoint>> simWorkerEndpoints;
 };

@@ -3,8 +3,8 @@
 
 CXX = g++
 CXXFLAGS = -std=c++17 -Wall -Wextra -g -I./include
-MBUS_COUNT ?= 8
-SBUS_COUNT ?= 3
+MBUS_COUNT ?= 1
+SBUS_COUNT ?= 1
 
 ## Source directories
 SRC_DIR = src
@@ -182,10 +182,24 @@ $(YUQUAN_SENTINEL):
 .PHONY: yuquan_build
 yuquan_build: $(YUQUAN_SENTINEL)
 
+.PHONY: yuquan_sim
+yuquan_sim: $(CORVUSITOR_BIN)
+	$(YUQUAN_MAKE) sim BIN=microbench
+
+.PHONY: yuquan_corvus_sim
+yuquan_corvus_sim: $(CORVUSITOR_BIN)
+	$(YUQUAN_MAKE) sim BIN=microbench CORVUSITOR=1 \
+	  CORVUSITOR_PATH=$(abspath $(CORVUSITOR_BIN)) \
+	  CORVUSITOR_MBUS_COUNT=$(MBUS_COUNT) \
+	  CORVUSITOR_SBUS_COUNT=$(SBUS_COUNT)
+
 ## Clean build artifacts
 .PHONY: clean
 clean:
 	rm -rf $(BUILD_DIR)
+	rm -rf $(YUQUAN_SIM_DIR)/corvusitor-compile
+	rm -f $(YUQUAN_OUTPUT_DIR)/$(YUQUAN_OUTPUT_NAME)_corvus.json
+	rm -f $(YUQUAN_OUTPUT_DIR)/C$(YUQUAN_OUTPUT_NAME)*
 
 ## Show help
 .PHONY: help

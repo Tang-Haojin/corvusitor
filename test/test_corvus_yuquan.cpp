@@ -118,9 +118,9 @@ int main(int argc, char* argv[]) {
   }
   std::string json_content((std::istreambuf_iterator<char>(json)),
                            std::istreambuf_iterator<char>());
-  if (json_content.find("partitions") == std::string::npos ||
-      json_content.find("top_inputs") == std::string::npos) {
-    std::cerr << "YuQuan json lacks expected sections\n";
+  if (json_content.find("recv_plans") == std::string::npos ||
+      json_content.find("\"0\"") == std::string::npos) {
+    std::cerr << "YuQuan json lacks expected recv plan sections\n";
     return 1;
   }
 

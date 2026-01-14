@@ -161,8 +161,8 @@ int main() {
   }
   std::string json_content((std::istreambuf_iterator<char>(ifs)),
                            std::istreambuf_iterator<char>());
-  if (json_content.find("top_inputs") == std::string::npos ||
-      json_content.find("partitions") == std::string::npos) {
+  if (json_content.find("recv_plans") == std::string::npos ||
+      json_content.find("\"-1\"") == std::string::npos) {
     std::cerr << "Unexpected JSON content\n";
     return 1;
   }

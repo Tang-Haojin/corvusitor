@@ -5,6 +5,7 @@
 - 路由策略：以接收端需求驱动的路由规划，远端 S→C 路由按 targetId=分区+1。
 - 约束校验：连接发现/分类时遇到多 driver、位宽不匹配、非法跨分区或 external 连接会直接抛错终止（不再仅打印 warning）。
 - 测试覆盖：`test_corvus_generator`（JSON/头文件烟测）、`test_corvus_slots`（跨分区 S→C）、`test_corvus_yuquan`（YuQuan 集成路径，需先生成 verilator 工件）、`test_corvus_yuquan_cmodel`（YuQuan CModel 集成）。
+- 数据结构精简：Top 及每个 worker 仅保留一张 `RecvPlan`（pid 为 key，Top 约定 pid=-1），每个 `RecvPlan` 记录信号名/位宽/`slots`。`slots` 为 `{slotId, bitOffset}` 列表（16-bit 片对齐），可选标记 `from_external`/`to_external`/`via_sbus` 仅用于发送端生成，不再输出 slot_bits/driverPid/bus 等冗余字段，`YuQuan_corvus.json` 仅包含 `recv_plans`+`warnings`。
 
 来自旧文档的补充
 - 输入/约束与分类规则已经汇总到 `docs/architecture.md`。

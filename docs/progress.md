@@ -23,11 +23,12 @@
 - 虚方法数据流映射：
 	- `TopModule::sendIAndEOutput()`：发送 I、Eo（MBus 下行）到 SimWorker 的 C 输入。
 	- `TopModule::loadOAndEInput()`：从 SimWorker 的 C 输出接收 O、Ei（MBus 上行）。
-	- `SimWorker::loadRemoteCInputs()`：拉取 MBus 下行的 I/Eo 以及 SBus 的远端 Si→Cj 输入。
-	- `SimWorker::sendRemoteCOutputs()`：发送本 worker C 输出的 O、Ei 上行到 Top（MBus 发）。
-	- `SimWorker::loadSInputs()`：读取本地 Ci→Si 输入，不经总线。
-	- `SimWorker::sendRemoteSOutputs()`：发送本 worker 的 S 阶段跨分区输出（SBus 发）。
-	- `SimWorker::loadLocalCInputs()`：本地 Si→Ci 直连，不经总线。
+	- `SimWorker::loadMBusCInputs()`：拉取 MBus 下行的 I/Eo。
+	- `SimWorker::loadSBusCInputs()`：拉取 SBus 的远端 Si→Cj 输入。
+	- `SimWorker::sendMBusCOutputs()`：发送本 worker C 输出的 O、Ei 上行到 Top（MBus 发）。
+	- `SimWorker::copySInputs()`：读取本地 Ci→Si 输入，不经总线。
+	- `SimWorker::sendSBusSOutputs()`：发送本 worker 的 S 阶段跨分区输出（SBus 发）。
+	- `SimWorker::copyLocalCInputs()`：本地 Si→Ci 直连，不经总线。
 - 虚方法伪代码模板（硬编码 slot，无查表）：
 	- `TopModule::sendIAndEOutput()`：
 		1. 对每个目标 worker，按硬编码 slotId 顺序从 topPorts/eModule 读出分片，打包 48-bit 帧。
@@ -35,19 +36,24 @@
 	- `TopModule::loadOAndEInput()`：
 		1. 依次遍历每条 mBusEndpoint，先读出该端点的 `bufferCnt`，再严格读取该端点的全部帧（读完这一条再读下一条）。
 		2. 使用硬编码的 switch/case 链按 slotId 直接写回 topPorts/eModule 切片；宽信号覆盖、重复帧幂等。
-	- `SimWorker::loadRemoteCInputs()`：
-		0. 对每条 mBusEndpoint、sBusEndpoint 分别获取 `bufferCnt`；对每条总线依次读满它的帧数（先读完一条再读下一条）。
-		1. 读取过程中按硬编码 slotId 直接写入 cModule 输入切片（I/Eo 来自 MBus，Si→Cj 来自 SBus），宽信号按片覆盖。
-	- `SimWorker::sendRemoteCOutputs()`：
-		1. 按硬编码 slotId 从 cModule 输出读取 O/Ei 切片，打包 48-bit 帧。
-		2. 在多条 mBusEndpoints 间简单轮询发送到 targetId=0，分散负载。
-	- `SimWorker::loadSInputs()`：
-		1. 依据硬编码映射执行 Ci→Si 内存拷贝（不经总线），宽信号按片拷贝。
-	- `SimWorker::sendRemoteSOutputs()`：
-		1. 按硬编码 slotId 读取 sModule 的跨分区输出切片，打包 48-bit 帧并发往对应 targetId（SBus）。
-		2. 在多条 sBusEndpoints 间简单轮询发送，分散负载。
-	- `SimWorker::loadLocalCInputs()`：
-		1. 依据硬编码映射执行 Si→Ci 内存拷贝（不经总线），宽信号按片拷贝。
+	- `SimWorker::loadMBusCInputs()`：
+		1. 逐条读取绑定到本 worker 的 mBusEndpoints，查询 `bufferCnt` 后将该端点上的帧一次性读空，保持与发送侧相同顺序。
+		2. 对每帧按 `[slotId, slotData]` 解码并走硬编码 switch/case，直接把 16-bit 分片写入对应的 C 输入缓冲，宽信号按片累积，重复帧覆盖同一片保证幂等。
+	- `SimWorker::loadSBusCInputs()`：
+		1. 在完成 MBus 拉取后遍历本分区订阅的 sBusEndpoints，按照 `bufferCnt` 将远端 S→C 帧全部取出。
+		2. 仍以硬编码 slot 表写入 C 输入缓冲，只区分 SBus 源并保持 16-bit 粒度拼接，确保跨分区依赖在本轮 C 阶段前就绪。
+	- `SimWorker::sendMBusCOutputs()`：
+		1. 在 `cModule->eval()` 之后执行由生成器静态展开的 `sendMBusCOutputs` 序列，按编译期硬编码的 slot 顺序从 C 输出缓冲提取位片、拼装 48-bit 帧，`targetId` 固定为 0（Top）。
+		2. 帧发送在 mBusEndpoints 间做简单轮询/分摊，逻辑同样在生成期固化，不依赖运行时查表。
+	- `SimWorker::copySInputs()`：
+		1. 生成器按 `copySInputs` 计划生成固定的 memcpy 片段，将本地 Ci→Si 直连对拷，直接从 C 输出缓冲读取分片写入 S 输入缓冲。
+		2. 宽信号按 bitOffset 切片，顺序在代码中硬编码，不经过任何总线，保证 S 阶段 eval 前数据完备。
+	- `SimWorker::sendSBusSOutputs()`：
+		1. 在 `sModule->eval()` 之后走静态展开的 `sendSBusSOutputs` 序列，按记录的 `targetId`（目标分区+1）与 slotId 取出 S 输出分片、打包帧。
+		2. 帧发送同样轮询本地 sBusEndpoints，所有目的端选择在代码中写死，只在运行时执行发送动作。
+	- `SimWorker::copyLocalCInputs()`：
+		1. 根据 `copyLocalCInputs` 计划在生成阶段直接产出固定的内存写回语句，把本地 Si→Ci 直连通路的输出片段写回下一轮 C 输入缓冲。
+		2. 该步骤在同步标志上报之后执行，偏移与覆盖宽度均为硬编码，允许重复执行保持幂等。
 
 # Corvus 代码生成方案指南
 
@@ -70,13 +76,12 @@
 	- externalInput：类型为 SlotRecvRecord 数组
 	- externalOutput：类型为 SlotSendRecord 数组
 - SimWorkerPlan 数据结构
-	- loadRemoteCInputs
-		- fromMBus：SlotRecvRecord 数组
-		- fromSBus：SlotRecvRecord 数组
-	- sendRemoteCOutputs：SlotSendRecord 数组
-	- loadSInputs：CopyRecord 数组
-	- sendRemoteSOutputs：SlotSendRecord 数组
-	- loadLocalCInputs: CopyRecord 数组
+	- loadMBusCInputs：SlotSendRecord 数组
+	- loadSBusCInputs：SlotSendRecord 数组
+	- sendMBusCOutputs：SlotSendRecord 数组
+	- copySInputs：CopyRecord 数组
+	- sendSBusSOutputs：SlotSendRecord 数组
+	- copyLocalCInputs: CopyRecord 数组
 - CorvusBusPlan 数据结构
 	- topModulePlan：类型为 TopModulePlan
 	- simWorkerPlans：类型为 SimWorkerPlan 数组

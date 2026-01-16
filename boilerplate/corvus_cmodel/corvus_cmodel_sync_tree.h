@@ -33,7 +33,9 @@ private:
     friend class CorvusCModelSimWorkerSynctreeEndpoint;
     std::atomic<uint8_t> simWorkerStartFlag;
     std::atomic<uint8_t> topSyncFlag;
-    std::vector<std::atomic<uint8_t>> simWorkerSFinishFlag;
+    std::atomic<uint8_t> topAllowSOutputFlag;
+    std::vector<std::atomic<uint8_t>> simWorkerInputReadyFlag;
+    std::vector<std::atomic<uint8_t>> simWorkerSyncFlag;
     std::shared_ptr<CorvusCModelTopSynctreeEndpoint> topEndpoint;
     std::vector<std::shared_ptr<CorvusCModelSimWorkerSynctreeEndpoint>> simWorkerEndpoints;
 };
@@ -46,7 +48,9 @@ public:
     void forceSimWorkerReset() override;
     bool isMBusClear() override;
     bool isSBusClear() override;
-    ValueFlag getSimWorkerSFinishFlag() override;
+    ValueFlag getSimWorkerSyncFlag() override;
+    ValueFlag getSimWorkerInputReadyFlag() override;
+    void setTopAllowSOutputFlag(ValueFlag flag) override;
     void setTopSyncFlag(ValueFlag flag) override;
     void setSimWorkerStartFlag(ValueFlag flag) override;
 private:
@@ -58,9 +62,11 @@ public:
     CorvusCModelSimWorkerSynctreeEndpoint(CorvusCModelSyncTree* tree, uint32_t idx);
     ~CorvusCModelSimWorkerSynctreeEndpoint() override = default;
 
-    void setSFinishFlag(ValueFlag flag) override;
+    void setSimWorkerInputReadyFlag(ValueFlag flag) override;
+    void setSimWorkerSyncFlag(ValueFlag flag) override;
     ValueFlag getTopSyncFlag() override;
     ValueFlag getSimWorkerStartFlag() override;
+    ValueFlag getTopAllowSOutputFlag() override;
 
 private:
     CorvusCModelSyncTree* tree;

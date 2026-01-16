@@ -30,24 +30,25 @@
 
 ## 运行时数据流（一个周期内）
 - Top → Worker（MBus）：`sendIAndEOutput` 将 I/Eo 分发到 mBusEndpoints，`targetId` 为目标分区+1。
-- Worker → Top（MBus）：`sendRemoteCOutputs` 将 O/Ei 发送到 `targetId=0`；Top 在 `loadOAndEInput` 写回 TopPorts / external。
-- Worker ↔ Worker（SBus）：`sendRemoteSOutputs` 将 `remote_s_to_c` 发送到目标分区；`loadRemoteCInputs`/`loadSInputs` 轮询 mBus/sBus 端点汇聚。
-- 本地直连：`loadSInputs` 负责 Ct→Si 拷贝，`loadLocalCInputs` 负责 St→Ci 拷贝，避免上总线。
+- Worker → Top（MBus）：`sendMBusCOutputs` 将 O/Ei 发送到 `targetId=0`；Top 在 `loadOAndEInput` 写回 TopPorts / external。
+- Worker ↔ Worker（SBus）：`sendSBusSOutputs` 将 `remote_s_to_c` 发送到目标分区；`loadMBusCInputs`/`loadSBusCInputs` 轮询 mBus/sBus 端点汇聚。
+- 本地直连：`copySInputs` 负责 Ct→Si 拷贝，`copyLocalCInputs` 负责 St→Ci 拷贝，避免上总线。
 
-## 同步时序（当前实现）
-- 顶层 Top 周期（参考 [boilerplate/corvus/corvus_top_module.cpp](boilerplate/corvus/corvus_top_module.cpp)）
-   1. `sendIAndEOutput()` 下发本轮输入与 external 输出。
-   2. 等待 `isMBusClear()` 与 `isSBusClear()` 均为真（上轮残留耗尽）。
-   3. `raiseTopSyncFlag()`：`topSyncFlag.updateToNext()`，调用 `setTopSyncFlag(topSyncFlag)`。
-   4. 等待 MBus 清空与所有 Worker S 完成一致：`getSimWorkerSFinishFlag()` == `prevSFinishFlag.nextValue()`，成功后 `prevSFinishFlag.updateToNext()`。
-   5. `loadOAndEInput()` 接收本轮输出与 external 输入。
+## 同步时序（当前实现，以 `boilerplate/corvus` 代码为准）
+- 顶层 Top 周期（见 [boilerplate/corvus/corvus_top_module.cpp](boilerplate/corvus/corvus_top_module.cpp)）
+   1. `sendIAndEOutput()`：下发本轮 I/Eo。
+   2. 等待 `isMBusClear()` 与 `isSBusClear()` 均为真（确保上轮帧被取空）。
+   3. `raiseTopSyncFlag()`：`topSyncFlag.updateToNext()` 后写入 `setTopSyncFlag(topSyncFlag)`。
+   4. 等待 Worker 拉取完 C 输入并上报：轮询 `isSimWorkerInputReadyFlagRaised()`（内部也要求 MBus 清空），成功后再 `raiseTopAllowSOutputFlag()`。
+   5. 等待 Worker S 完成：`synctreeEndpoint->isMBusClear()` 与 `isSimWorkerSyncFlagRaised()` 同时满足（MBus 为空、S 阶段结束）。
+   6. `loadOAndEInput()`：写回本轮 O/Ei。
 
-- Worker 周期（参考 [boilerplate/corvus/corvus_sim_worker.cpp](boilerplate/corvus/corvus_sim_worker.cpp)）
-   1. 轮询 `getTopSyncFlag()`，当等于 `prevTopSyncFlag.nextValue()` 时进入本轮并 `prevTopSyncFlag.updateToNext()`。
-   2. C 阶段：`loadRemoteCInputs()` → `cModule->eval()` → `sendRemoteCOutputs()`。
-   3. S 阶段：`loadSInputs()` → `sModule->eval()` → `sendRemoteSOutputs()`。
-   4. 完成上报：`raiseSFinishFlag()`，将本地 `sFinishFlag` 提升并 `setSFinishFlag(sFinishFlag)`；随后 `loadLocalCInputs()` 执行本地 St→Ci 拷贝。
-   5. 循环尾：记录阶段日志，进入下一轮等待 Top 同步变化。
+- Worker 周期（见 [boilerplate/corvus/corvus_sim_worker.cpp](boilerplate/corvus/corvus_sim_worker.cpp)）
+   1. 等待 `getTopSyncFlag()` 递增到 `prevTopSyncFlag.nextValue()`，确认进入本轮。
+   2. C 阶段：`loadMBusCInputs()` → `loadSBusCInputs()` → `raiseSimWorkerInputReadyFlag()` → `cModule->eval()` → `sendMBusCOutputs()` → `copySInputs()`。
+   3. S 阶段：`sModule->eval()` → 等待 `isTopAllowSOutputFlagRaised()` → `sendSBusSOutputs()`。
+   4. 完成上报：`raiseSimWorkerSyncFlag()`（对应 Top 的 S finish 判定）→ `copyLocalCInputs()`（本地 St→Ci 拷贝）。
+   5. 循环尾：根据 `loopContinue` 决定是否进入下一轮。
 
 - 辅助/初始化
    - 顶层在启动前调用 `prepareSimWorker()`：`setSimWorkerStartFlag(ValueFlag::START_GUARD)` 作为 Worker 启动哨兵；Worker 提供 `hasStartFlagSeen()` 用于检测，但当前主循环以 Top 同步为驱动。

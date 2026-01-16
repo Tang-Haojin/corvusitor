@@ -159,7 +159,7 @@ int main() {
   }
   std::string json_content((std::istreambuf_iterator<char>(plan)),
                            std::istreambuf_iterator<char>());
-  if (json_content.find("sendRemoteSOutputs") == std::string::npos ||
+  if (json_content.find("sendSBusSOutputs") == std::string::npos ||
       json_content.find("s0_to_c1") == std::string::npos) {
     std::cerr << "s0_to_c1 mapping not found in JSON\n";
     return 1;

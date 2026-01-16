@@ -290,13 +290,13 @@ void sort_bus_plan(CorvusBusPlan& plan) {
   sort_recv(plan.topModulePlan.externalInput);
 
   for (auto& kv : plan.simWorkerPlans) {
-    sort_recv(kv.second.loadRemoteCInputs.fromMBus);
-    sort_recv(kv.second.loadRemoteCInputs.fromSBus);
-    sort_send(kv.second.sendRemoteCOutputs);
-    sort_send(kv.second.sendRemoteSOutputs);
-    std::sort(kv.second.loadSInputs.begin(), kv.second.loadSInputs.end(),
+    sort_recv(kv.second.loadMBusCInputs);
+    sort_recv(kv.second.loadSBusCInputs);
+    sort_send(kv.second.sendMBusCOutputs);
+    sort_send(kv.second.sendSBusSOutputs);
+    std::sort(kv.second.copySInputs.begin(), kv.second.copySInputs.end(),
               [](const CopyRecord& a, const CopyRecord& b) { return a.portName < b.portName; });
-    std::sort(kv.second.loadLocalCInputs.begin(), kv.second.loadLocalCInputs.end(),
+    std::sort(kv.second.copyLocalCInputs.begin(), kv.second.copyLocalCInputs.end(),
               [](const CopyRecord& a, const CopyRecord& b) { return a.portName < b.portName; });
   }
 }
@@ -375,7 +375,7 @@ GenerationPlan build_generation_plan(const ConnectionAnalysis& analysis,
         recv_meta.receiver_port = recv.port;
         recv_meta.array_size = array_size_from_endpoint(recv, conn.width_type);
 
-        gen.bus_plan.simWorkerPlans[pid].loadRemoteCInputs.fromMBus.push_back(recv_rec);
+        gen.bus_plan.simWorkerPlans[pid].loadMBusCInputs.push_back(recv_rec);
         wp.mbus_recvs.push_back(recv_meta);
 
         SlotSendRecord send_rec;
@@ -422,7 +422,7 @@ GenerationPlan build_generation_plan(const ConnectionAnalysis& analysis,
         recv_meta.from_external = true;
         recv_meta.array_size = conn.driver.port ? conn.driver.port->array_size : array_size_from_endpoint(recv, conn.width_type);
 
-        gen.bus_plan.simWorkerPlans[pid].loadRemoteCInputs.fromMBus.push_back(recv_rec);
+        gen.bus_plan.simWorkerPlans[pid].loadMBusCInputs.push_back(recv_rec);
         wp.mbus_recvs.push_back(recv_meta);
 
         SlotSendRecord send_rec;
@@ -475,7 +475,7 @@ GenerationPlan build_generation_plan(const ConnectionAnalysis& analysis,
         recv_meta.via_sbus = true;
         recv_meta.array_size = conn.driver.port ? conn.driver.port->array_size : array_size_from_endpoint(recv, conn.width_type);
 
-        gen.bus_plan.simWorkerPlans[dst_pid].loadRemoteCInputs.fromSBus.push_back(recv_rec);
+        gen.bus_plan.simWorkerPlans[dst_pid].loadSBusCInputs.push_back(recv_rec);
         dst_wp.sbus_recvs.push_back(recv_meta);
 
         SlotSendRecord send_rec;
@@ -492,7 +492,7 @@ GenerationPlan build_generation_plan(const ConnectionAnalysis& analysis,
         send_meta.driver_port = conn.driver.port;
         send_meta.array_size = recv_meta.array_size;
 
-        gen.bus_plan.simWorkerPlans[src_pid].sendRemoteSOutputs.push_back(send_rec);
+        gen.bus_plan.simWorkerPlans[src_pid].sendSBusSOutputs.push_back(send_rec);
         src_wp.send_remote.push_back(send_meta);
       }
     }
@@ -527,7 +527,7 @@ GenerationPlan build_generation_plan(const ConnectionAnalysis& analysis,
         send_meta.driver_port = conn.driver.port;
         send_meta.array_size = conn.driver.port ? conn.driver.port->array_size : 0;
 
-        gen.bus_plan.simWorkerPlans[pid].sendRemoteCOutputs.push_back(send_rec);
+        gen.bus_plan.simWorkerPlans[pid].sendMBusCOutputs.push_back(send_rec);
         wp.send_to_top.push_back(send_meta);
       }
     }
@@ -561,7 +561,7 @@ GenerationPlan build_generation_plan(const ConnectionAnalysis& analysis,
         send_meta.to_external = true;
         send_meta.array_size = conn.driver.port ? conn.driver.port->array_size : 0;
 
-        gen.bus_plan.simWorkerPlans[pid].sendRemoteCOutputs.push_back(send_rec);
+        gen.bus_plan.simWorkerPlans[pid].sendMBusCOutputs.push_back(send_rec);
         wp.send_to_top.push_back(send_meta);
       }
     }
@@ -579,7 +579,7 @@ GenerationPlan build_generation_plan(const ConnectionAnalysis& analysis,
 
       CopyRecord rec;
       rec.portName = conn.port_name;
-      gen.bus_plan.simWorkerPlans[pid].loadSInputs.push_back(rec);
+      gen.bus_plan.simWorkerPlans[pid].copySInputs.push_back(rec);
 
       CopyMeta meta;
       meta.record = rec;
@@ -606,7 +606,7 @@ GenerationPlan build_generation_plan(const ConnectionAnalysis& analysis,
 
       CopyRecord rec;
       rec.portName = conn.port_name;
-      gen.bus_plan.simWorkerPlans[pid].loadLocalCInputs.push_back(rec);
+      gen.bus_plan.simWorkerPlans[pid].copyLocalCInputs.push_back(rec);
 
       CopyMeta meta;
       meta.record = rec;
@@ -903,11 +903,12 @@ std::string generate_worker_header(const std::string& output_base,
   os << "protected:\n";
   os << "  void createSimModules() override;\n";
   os << "  void deleteSimModules() override;\n";
-  os << "  void loadRemoteCInputs() override;\n";
-  os << "  void sendRemoteCOutputs() override;\n";
-  os << "  void loadSInputs() override;\n";
-  os << "  void sendRemoteSOutputs() override;\n";
-  os << "  void loadLocalCInputs() override;\n";
+  os << "  void loadMBusCInputs() override;\n";
+  os << "  void loadSBusCInputs() override;\n";
+  os << "  void sendMBusCOutputs() override;\n";
+  os << "  void copySInputs() override;\n";
+  os << "  void sendSBusSOutputs() override;\n";
+  os << "  void copyLocalCInputs() override;\n";
   os << "};\n\n";
   os << "} // namespace corvus_generated\n";
   os << "#endif // " << guard << "\n";
@@ -949,16 +950,15 @@ std::string generate_worker_cpp(const std::string& output_base,
   os << "  cModule = nullptr; sModule = nullptr;\n";
   os << "}\n\n";
 
-  // loadRemoteCInputs
-  os << "void " << worker_class << "::loadRemoteCInputs() {\n";
+  // loadMBusCInputs
+  os << "void " << worker_class << "::loadMBusCInputs() {\n";
   os << "  auto* combHandle = static_cast<VerilatorModuleHandle<" << wp.comb->class_name << ">* >(cModule);\n";
   os << "  auto* comb = combHandle ? combHandle->mp : nullptr;\n";
   os << "  if (!comb) return;\n";
   os << "  const uint64_t kSlotMask = 0xFFFFFFFFULL;\n";
-  if (wp.mbus_recvs.empty() && wp.sbus_recvs.empty()) {
+  if (wp.mbus_recvs.empty()) {
     os << "  (void)kSlotMask;\n";
-  }
-  if (!wp.mbus_recvs.empty()) {
+  } else {
     os << "  for (size_t ep = 0; ep < mBusEndpoints.size(); ++ep) {\n";
     os << "    int cnt = mBusEndpoints[ep]->bufferCnt();\n";
     os << "    for (int i = 0; i < cnt; ++i) {\n";
@@ -993,7 +993,17 @@ std::string generate_worker_cpp(const std::string& output_base,
     os << "    }\n";
     os << "  }\n";
   }
-  if (!wp.sbus_recvs.empty()) {
+  os << "}\n\n";
+
+  // loadSBusCInputs
+  os << "void " << worker_class << "::loadSBusCInputs() {\n";
+  os << "  auto* combHandle = static_cast<VerilatorModuleHandle<" << wp.comb->class_name << ">* >(cModule);\n";
+  os << "  auto* comb = combHandle ? combHandle->mp : nullptr;\n";
+  os << "  if (!comb) return;\n";
+  os << "  const uint64_t kSlotMask = 0xFFFFFFFFULL;\n";
+  if (wp.sbus_recvs.empty()) {
+    os << "  (void)kSlotMask;\n";
+  } else {
     os << "  for (size_t ep = 0; ep < sBusEndpoints.size(); ++ep) {\n";
     os << "    int cnt = sBusEndpoints[ep]->bufferCnt();\n";
     os << "    for (int i = 0; i < cnt; ++i) {\n";
@@ -1030,8 +1040,8 @@ std::string generate_worker_cpp(const std::string& output_base,
   }
   os << "}\n\n";
 
-  // sendRemoteCOutputs
-  os << "void " << worker_class << "::sendRemoteCOutputs() {\n";
+  // sendMBusCOutputs
+  os << "void " << worker_class << "::sendMBusCOutputs() {\n";
   os << "  auto* combHandle = static_cast<VerilatorModuleHandle<" << wp.comb->class_name << ">* >(cModule);\n";
   os << "  auto* comb = combHandle ? combHandle->mp : nullptr;\n";
   os << "  if (!comb) return;\n";
@@ -1070,8 +1080,8 @@ std::string generate_worker_cpp(const std::string& output_base,
   }
   os << "}\n\n";
 
-  // loadSInputs (C->S local copy)
-  os << "void " << worker_class << "::loadSInputs() {\n";
+  // copySInputs (C->S local copy)
+  os << "void " << worker_class << "::copySInputs() {\n";
   os << "  auto* combHandle = static_cast<VerilatorModuleHandle<" << wp.comb->class_name << ">* >(cModule);\n";
   os << "  auto* seqHandle = static_cast<VerilatorModuleHandle<" << wp.seq->class_name << ">* >(sModule);\n";
   os << "  auto* comb = combHandle ? combHandle->mp : nullptr;\n";
@@ -1090,8 +1100,8 @@ std::string generate_worker_cpp(const std::string& output_base,
   }
   os << "}\n\n";
 
-  // sendRemoteSOutputs
-  os << "void " << worker_class << "::sendRemoteSOutputs() {\n";
+  // sendSBusSOutputs
+  os << "void " << worker_class << "::sendSBusSOutputs() {\n";
   os << "  auto* seqHandle = static_cast<VerilatorModuleHandle<" << wp.seq->class_name << ">* >(sModule);\n";
   os << "  auto* seq = seqHandle ? seqHandle->mp : nullptr;\n";
   os << "  if (!seq) return;\n";
@@ -1130,8 +1140,8 @@ std::string generate_worker_cpp(const std::string& output_base,
   }
   os << "}\n\n";
 
-  // loadLocalCInputs (S->C local copy)
-  os << "void " << worker_class << "::loadLocalCInputs() {\n";
+  // copyLocalCInputs (S->C local copy)
+  os << "void " << worker_class << "::copyLocalCInputs() {\n";
   os << "  auto* combHandle = static_cast<VerilatorModuleHandle<" << wp.comb->class_name << ">* >(cModule);\n";
   os << "  auto* seqHandle = static_cast<VerilatorModuleHandle<" << wp.seq->class_name << ">* >(sModule);\n";
   os << "  auto* comb = combHandle ? combHandle->mp : nullptr;\n";
@@ -1287,20 +1297,18 @@ bool CorvusGenerator::write_bus_plan_json(const CorvusBusPlan& plan,
   ofs << "  \"simWorkerPlans\": {\n";
   for (auto it = plan.simWorkerPlans.begin(); it != plan.simWorkerPlans.end(); ++it) {
     ofs << "    \"" << it->first << "\": {\n";
-    ofs << "      \"loadRemoteCInputs\": {\n";
-    ofs << "        \"fromMBus\": ";
-    write_recv_vec(it->second.loadRemoteCInputs.fromMBus);
-    ofs << ",\n        \"fromSBus\": ";
-    write_recv_vec(it->second.loadRemoteCInputs.fromSBus);
-    ofs << "\n      },\n";
-    ofs << "      \"sendRemoteCOutputs\": ";
-    write_send_vec(it->second.sendRemoteCOutputs);
-    ofs << ",\n      \"loadSInputs\": ";
-    write_copy_vec(it->second.loadSInputs);
-    ofs << ",\n      \"sendRemoteSOutputs\": ";
-    write_send_vec(it->second.sendRemoteSOutputs);
-    ofs << ",\n      \"loadLocalCInputs\": ";
-    write_copy_vec(it->second.loadLocalCInputs);
+    ofs << "      \"loadMBusCInputs\": ";
+    write_recv_vec(it->second.loadMBusCInputs);
+    ofs << ",\n      \"loadSBusCInputs\": ";
+    write_recv_vec(it->second.loadSBusCInputs);
+    ofs << ",\n      \"sendMBusCOutputs\": ";
+    write_send_vec(it->second.sendMBusCOutputs);
+    ofs << ",\n      \"copySInputs\": ";
+    write_copy_vec(it->second.copySInputs);
+    ofs << ",\n      \"sendSBusSOutputs\": ";
+    write_send_vec(it->second.sendSBusSOutputs);
+    ofs << ",\n      \"copyLocalCInputs\": ";
+    write_copy_vec(it->second.copyLocalCInputs);
     ofs << "\n    }";
     auto next_it = it;
     ++next_it;

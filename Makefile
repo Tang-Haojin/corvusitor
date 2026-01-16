@@ -4,7 +4,7 @@
 CXX = g++
 CXXFLAGS = -std=c++17 -Wall -Wextra -g -I./include
 MBUS_COUNT ?= 1
-SBUS_COUNT ?= 1
+SBUS_COUNT ?= 8
 
 ## Source directories
 SRC_DIR = src

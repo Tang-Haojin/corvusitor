@@ -35,14 +35,12 @@ public:
   };
 
   struct SimWorkerPlan {
-    struct LoadRemoteCInputs {
-      std::vector<SlotRecvRecord> fromMBus;
-      std::vector<SlotRecvRecord> fromSBus;
-    } loadRemoteCInputs;
-    std::vector<SlotSendRecord> sendRemoteCOutputs;
-    std::vector<CopyRecord> loadSInputs;
-    std::vector<SlotSendRecord> sendRemoteSOutputs;
-    std::vector<CopyRecord> loadLocalCInputs;
+    std::vector<SlotRecvRecord> loadMBusCInputs;
+    std::vector<SlotRecvRecord> loadSBusCInputs;
+    std::vector<SlotSendRecord> sendMBusCOutputs;
+    std::vector<CopyRecord> copySInputs;
+    std::vector<SlotSendRecord> sendSBusSOutputs;
+    std::vector<CopyRecord> copyLocalCInputs;
   };
 
   struct CorvusBusPlan {

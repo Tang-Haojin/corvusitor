@@ -3,52 +3,66 @@
 
 #include <cstdint>
 
-class CorvusSynctreeEndpoint{
-    public:
-    class ValueFlag {
+class CorvusSynctreeEndpoint
+{
+public:
+    class ValueFlag
+    {
     public:
         constexpr static uint8_t START_GUARD = 0xBE;
-        ValueFlag(): value(0) {}
-        ValueFlag(uint8_t v): value(v) {}
-        uint8_t getValue() const {
+        ValueFlag() : value(0) {}
+        ValueFlag(uint8_t v) : value(v) {}
+        uint8_t getValue() const
+        {
             return value;
         }
-        uint8_t nextValue() const {
+        uint8_t nextValue() const
+        {
             uint8_t v = (value + 1) & MASK;
             return v == 0 ? 1 : v;
         }
-        void updateToNext() {
+        void updateToNext()
+        {
             value = nextValue();
         }
-        void reset() {
+        void reset()
+        {
             value = 0;
         }
-        void setValue(uint8_t v) {
+        void setValue(uint8_t v)
+        {
             value = v;
         }
+
     private:
         uint8_t value = 0;
         constexpr static uint8_t MASK = 0xFF;
-        
     };
 };
 
-class CorvusTopSynctreeEndpoint : public CorvusSynctreeEndpoint {
+class CorvusTopSynctreeEndpoint : public CorvusSynctreeEndpoint
+{
 public:
-  virtual ~CorvusTopSynctreeEndpoint() = default;
-    virtual void forceSimWorkerReset();
-  virtual bool isMBusClear() = 0;
-  virtual bool isSBusClear() = 0;
-    virtual ValueFlag getSimWorkerSFinishFlag() = 0;
+    virtual ~CorvusTopSynctreeEndpoint() = default;
+    virtual void forceSimWorkerReset() {};
+    virtual bool isMBusClear() = 0;
+    virtual bool isSBusClear() = 0;
+    virtual ValueFlag getSimWorkerSyncFlag() = 0;
+    virtual ValueFlag getSimWorkerInputReadyFlag() = 0;
+    virtual void setTopAllowSOutputFlag(ValueFlag flag) = 0;
     virtual void setTopSyncFlag(ValueFlag flag) = 0;
-  virtual void setSimWorkerStartFlag(ValueFlag flag) = 0;
+    virtual void setSimWorkerStartFlag(ValueFlag flag) = 0;
 };
 
-class CorvusSimWorkerSynctreeEndpoint : public CorvusSynctreeEndpoint {
+class CorvusSimWorkerSynctreeEndpoint : public CorvusSynctreeEndpoint
+{
 public:
     virtual ~CorvusSimWorkerSynctreeEndpoint() = default;
-    virtual void setSFinishFlag(ValueFlag flag) = 0;
-    virtual ValueFlag getTopSyncFlag() = 0;
+    
     virtual ValueFlag getSimWorkerStartFlag() = 0;
+    virtual ValueFlag getTopSyncFlag() = 0;
+    virtual void setSimWorkerInputReadyFlag(ValueFlag flag) = 0;
+    virtual ValueFlag getTopAllowSOutputFlag() = 0;
+    virtual void setSimWorkerSyncFlag(ValueFlag flag) = 0;
 };
 #endif

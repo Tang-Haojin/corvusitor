@@ -16,10 +16,13 @@ CorvusSimWorker::CorvusSimWorker(CorvusSimWorkerSynctreeEndpoint* simWorkerSynct
 CorvusSimWorker::~CorvusSimWorker() {
     std::cout << "[CorvusSimWorker] Destructor state: "
               << "name=" << (workerName.empty() ? "<unnamed>" : workerName)
-              << ", sFinishFlag=" << static_cast<int>(sFinishFlag.getValue())
-              << ", prevTopSyncFlag=" << static_cast<int>(prevTopSyncFlag.getValue())
-              << ", lastStage=" << lastStage 
-              << ", loopCount=" << loopCount;
+                << ", loopCount=" << loopCount
+                << ", lastStage=" << lastStage
+                << ", prevTopSyncFlag=" << static_cast<unsigned int>(prevTopSyncFlag.getValue())
+                << ", prevTopAllowSOutputFlag=" << static_cast<unsigned int>(prevTopAllowSOutputFlag.getValue())
+                << ", simWorkerInputReadyFlag=" << static_cast<unsigned int>(simWorkerInputReadyFlag.getValue())
+                << ", simWorkerSyncFlag=" << static_cast<unsigned int>(simWorkerSyncFlag.getValue()); 
+
     if (synctreeEndpoint) {
         std::cout << ", topSyncFlag(now)="
                   << static_cast<int>(synctreeEndpoint->getTopSyncFlag().getValue());
@@ -35,21 +38,27 @@ void CorvusSimWorker::loop() {
     while(loopContinue) {
         loopCount++;
         logStage("waiting for top sync");
-        while(loopContinue && !isTopSyncFlagRaised()) {
-            // yield to allow stop requests to be observed promptly
-            // std::this_thread::yield();
-        }
+        while(loopContinue && !isTopSyncFlagRaised()) {}
         if (!loopContinue) break;
         logStage(std::string("get top sync flag as ") + std::to_string(prevTopSyncFlag.getValue()));
-        loadRemoteCInputs();
+        loadMBusCInputs();
+        loadSBusCInputs();
+        logStage("raise sim worker input ready flag");
+        raiseSimWorkerInputReadyFlag();
+        logStage(std::string("sim worker input ready flag raised to ") + std::to_string(simWorkerInputReadyFlag.getValue()));
         cModule->eval();
-        sendRemoteCOutputs();
-        loadSInputs();
+        sendMBusCOutputs();
+        copySInputs();
         sModule->eval();
-        sendRemoteSOutputs();
-        raiseSFinishFlag();
-        logStage(std::string("S finish flag raised to ") + std::to_string(sFinishFlag.getValue()));
-        loadLocalCInputs();
+        logStage("waiting for top allow S output");
+        while(loopContinue && !isTopAllowSOutputFlagRaised()) {}
+        if (!loopContinue) break;
+        logStage(std::string("get top allow S output flag as ") + std::to_string(prevTopAllowSOutputFlag.getValue()));
+        sendSBusSOutputs();
+        logStage("raise sim worker sync flag");
+        raiseSimWorkerSyncFlag();
+        logStage(std::string("SimWorkerSync flag raised to ") + std::to_string(simWorkerSyncFlag.getValue()));
+        copyLocalCInputs();
     }
 }
 
@@ -57,9 +66,34 @@ void CorvusSimWorker::stop() {
     loopContinue = false;
 }
 
-void CorvusSimWorker::raiseSFinishFlag() {
-    sFinishFlag.updateToNext();
-    synctreeEndpoint->setSFinishFlag(sFinishFlag);
+
+void CorvusSimWorker::raiseSimWorkerInputReadyFlag() {
+    simWorkerInputReadyFlag.updateToNext();
+    synctreeEndpoint->setSimWorkerInputReadyFlag(simWorkerInputReadyFlag);
+}
+
+bool CorvusSimWorker::isTopAllowSOutputFlagRaised() {
+    auto flag = synctreeEndpoint->getTopAllowSOutputFlag();
+    if(flag.getValue() == prevTopAllowSOutputFlag.getValue()) {
+        return false;
+    } else if(flag.getValue() == prevTopAllowSOutputFlag.nextValue()) {
+        prevTopAllowSOutputFlag.updateToNext();
+        return true;
+    } else {
+        while(1){
+            std::cerr << "[CorvusSimWorker] Fatal error: unexpected top allow S output flag value="
+                    << static_cast<int>(flag.getValue())
+                    << " (expected " << static_cast<int>(prevTopAllowSOutputFlag.getValue())
+                    << " or " << static_cast<int>(prevTopAllowSOutputFlag.nextValue()) << ")"
+                    << " in SimWorker(" << (workerName.empty() ? "unnamed" : workerName) << ")"
+                    << std::endl;
+        }
+    }
+}
+
+void CorvusSimWorker::raiseSimWorkerSyncFlag() {
+    simWorkerSyncFlag.updateToNext();
+    synctreeEndpoint->setSimWorkerSyncFlag(simWorkerSyncFlag);
 }
 
 bool CorvusSimWorker::hasStartFlagSeen() {
@@ -91,7 +125,7 @@ void CorvusSimWorker::setName(std::string name) {
 }
 
 void CorvusSimWorker::logStage(std::string stageLabel) {
-    // lastStage = stageLabel;
+    lastStage = std::move(stageLabel);
     // printf("SimWorker(%s) loopCount=%llu stage=%s\n",
     //        workerName.empty() ? "unnamed" : workerName.c_str(),
     //        static_cast<unsigned long long>(loopCount),

@@ -20,21 +20,27 @@ class CorvusSimWorker : public SimWorker {
         CorvusSimWorkerSynctreeEndpoint* synctreeEndpoint;
         std::vector<CorvusBusEndpoint*> mBusEndpoints;
         std::vector<CorvusBusEndpoint*> sBusEndpoints;
-        virtual void loadRemoteCInputs() = 0;
-        virtual void sendRemoteCOutputs() = 0;
-        virtual void loadSInputs() = 0;
-        virtual void sendRemoteSOutputs() = 0;
-        virtual void loadLocalCInputs() = 0;
         uint64_t loopCount = 0;
+        virtual void loadMBusCInputs()=0;
+        virtual void loadSBusCInputs()=0;
+        virtual void sendMBusCOutputs()=0;
+        virtual void copySInputs()=0;
+        virtual void sendSBusSOutputs()=0;
+        virtual void copyLocalCInputs()=0;
     private:
-        CorvusSynctreeEndpoint::ValueFlag sFinishFlag;
+        // Compatibility helpers for the newer sync flow; implemented using legacy hooks.
+        bool hasStartFlagSeen();
+        bool isTopSyncFlagRaised();
+        void raiseSimWorkerInputReadyFlag();
+        bool isTopAllowSOutputFlagRaised();
+        void raiseSimWorkerSyncFlag();
+        CorvusSynctreeEndpoint::ValueFlag simWorkerInputReadyFlag;
+        CorvusSynctreeEndpoint::ValueFlag simWorkerSyncFlag;
         CorvusSynctreeEndpoint::ValueFlag prevTopSyncFlag;
+        CorvusSynctreeEndpoint::ValueFlag prevTopAllowSOutputFlag;
         std::string lastStage = "init";
         std::string workerName;
         bool loopContinue;
-        void raiseSFinishFlag();
-        bool hasStartFlagSeen();
-        bool isTopSyncFlagRaised();
         void logStage(std::string stageLabel);
 };
 

@@ -25,13 +25,15 @@ protected:
     uint64_t evalCount = 0;
 
 private:
-    CorvusSynctreeEndpoint::ValueFlag prevSFinishFlag;
+    CorvusSynctreeEndpoint::ValueFlag prevSimWorkerInputReadyFlag;
+    CorvusSynctreeEndpoint::ValueFlag prevSimWorkerSyncFlag;
     CorvusSynctreeEndpoint::ValueFlag topSyncFlag;
+    CorvusSynctreeEndpoint::ValueFlag topAllowSOutputFlag;
     std::string lastStage = "init";
-    
-
-    bool allSimWorkerSFinish();
+    bool isSimWorkerInputReadyFlagRaised();
+    bool isSimWorkerSyncFlagRaised();
     void raiseTopSyncFlag();
+    void raiseTopAllowSOutputFlag();
     void clearMBusRecvBuffer();
     void logStage(std::string stageLabel);
 };

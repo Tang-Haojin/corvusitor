@@ -1,79 +1,75 @@
 # Corvusitor 架构
 
- Corvusitor 负责从仿真器（当前仅实现 Verilator，其余暂未实现、遇到会报错）产出的模块中发现拓扑、做 corvus 语义分类，并生成可直接运行的 CorvusTop/SimWorker 代码。
+Corvusitor 负责从仿真器产出的 Verilator 模块中发现拓扑、做 corvus 语义分类，并生成可直接运行的 CorvusTop/SimWorker/CModel 封装代码（VCS/Modelsim 解析仍为占位，发现会报错）。
 
 ## 流水线概览
-- 模块发现与解析：`ModuleDiscoveryManager` + `ModuleParser` 识别 comb/seq/external 模块并提取端口信息（仅 Verilator 实现；发现 VCS/Modelsim 会抛错提示未支持）。
-- 连接分析：`ConnectionBuilder::analyze` 将端口分组并分类为 corvus 语义，返回 `ConnectionAnalysis`。
-- 目标生成：`CodeGenerator` 封装上述步骤并接受 `mbus_count`/`sbus_count` 配置，将 `ConnectionAnalysis` 交给目标生成器（当前为 `CorvusGenerator`）。
-- 产出：`CorvusGenerator` 生成 `<output>_connection_analysis.json`（分析快照）与 `<output>_corvus_bus_plan.json`（总线/拷贝计划），以及与类名一致的生成文件：`C<output>TopModuleGen.{h,cpp}`/`C<output>SimWorkerGenP*.{h,cpp}`（聚合头 `C<output>CorvusGen.h`），类名前缀携带用户 output；CModel 入口由 `CorvusCModelGenerator` 生成 `C<output>CModelGen.h`。
+- 模块发现：`ModuleDiscoveryManager` 并行尝试 Verilator/VCS/Modelsim 目录模式，当前只有 Verilator 模式可正常解析（`verilator-compile-<mod>/V<mod>.h`），命中未实现的解析器会抛错。
+- 模块解析：`ModuleParserFactory` 创建对应 parser，Verilator 通过正则解析 `VL_IN/OUT(8|16|64|W)` 宏获取端口方向/位宽；生成 `ModuleInfo`（包含实例名/分区/端口列表）。
+- 拓扑校验：`CodeGenerator::load_data` 校验 comb/seq 数量一致且均 >0，external ≤1，随后用 `ConnectionBuilder::analyze` 做 corvus 分类（出现约束违例直接抛出 runtime_error）。
+- 目标生成：`CodeGenerator` 根据 CLI 选择 `CorvusGenerator` 或 `CorvusCModelGenerator`，并传入 `mbus_count`/`sbus_count`。`CorvusGenerator` 负责 JSON + Top/Worker 代码；CModel 目标在此基础上追加模拟器封装。
+- 输出约定：类名前缀源自 `--output-name`（先做路径基名 + 非字母数字替换 + 前缀 `C`），文件前缀为 `<output_dir>/<output_name>`，因此输出路径与类名互不混用。
 
 ## 输入约束（来自仿真输出）
-- 模块类型：`corvus_comb_P*`、`corvus_seq_P*`、可选 `corvus_external`。comb/seq 数量相同（N），external 最多 1 个（已在代码中校验）。
-- 命名/位宽：同名端口必须同位宽，否则非法；输出可 fanout 至多路输入，输入最多被 1 个输出驱动（多 driver 会被拒绝）。
-- 顶层端口：未被驱动的输入视为 I（top_inputs），无接收的输出视为 O（top_outputs），均属于 comb。
-- 约束：`seq_Px` 的输入仅可来自同分区 `comb_Px`；Ei=external 输入只能由 comb 驱动，Eo=external 输出只能驱动 comb 输入。
-- 以上约束一旦被违反，生成会立即报错退出（不再以 warning 继续）。
+- 模块形态：`corvus_comb_P*`、`corvus_seq_P*`、可选 `corvus_external`；comb/seq 数量必须相同且 >0，external 最多 1（在 `load_data` 里强校验）。
+- 目录命名：Verilator 期望 `verilator-compile-<module>` 目录下有 `V<module>.h`；发现 VCS/Modelsim 模式会报 “parser not implemented”。
+- 端口命名/位宽：同名端口必须同位宽同类型，宽度不一致或多 driver 会直接抛错；VL_W 宽度按端点的 `array_size` 处理。
+- 允许的驱动关系：
+  - 无 driver → 视为顶层输入（所有接收端必须是 COMB，否则报错）。
+  - COMB driver 只能驱动同分区 SEQ 或 external；跨分区 SEQ 会报错。
+  - SEQ driver 只能驱动 COMB，同分区记作本地，跨分区记作 remote S→C。
+  - EXTERNAL driver 只能驱动 COMB。
+  - COMB 驱动未被消费时生成顶层输出（SEQ/EXTERNAL 未被消费的输出直接忽略）。
 
 ## 数据模型（ConnectionAnalysis）
-- 顶层：`top_inputs` / `top_outputs`；缺 driver/receiver 分别视为 I/O。
+- 顶层：`top_inputs` / `top_outputs`。
 - External：`external_inputs`（comb→external，Ei） / `external_outputs`（external→comb，Eo）。
 - 分区：`partitions[pid]`，包含本地 `local_c_to_s`、`local_s_to_c`，以及跨分区 `remote_s_to_c`。
-- 每条连接携带 `port_name`、`width`/`width_type`（对应 `PortWidthType` 枚举）、`driver`、`receivers`（module/port 名及指针）。
+- 每条连接携带 `port_name`、`width`/`width_type`（对应 `PortWidthType` 枚举）、`driver`、`receivers`（module/port 指针）。
 
 ### 分类规则概要
-1. 按端口名聚合并比对位宽，得到原始 `PortConnection`（支持多 driver/receiver）。
-2. 仅统计“将要接收”的信号，未被消费的 driver 不膨胀计数。
-3. 按 receiver 拆分分类：
-   - 无 driver → `top_inputs`
-   - 无 receiver → `top_outputs`
-   - COMB driver：同分区 SEQ → `local_c_to_s`；EXTERNAL → `external_inputs`；其他类型报错
-   - SEQ driver：COMB 同分区 → `local_s_to_c`；COMB 跨分区 → `remote_s_to_c`；其他类型报错
-   - EXTERNAL driver：COMB → `external_outputs`；其他类型报错
+1. 按端口名聚合，强制单 driver、位宽一致。
+2. 无 driver → 记录到 `top_inputs`；无 receiver 且 driver 为 COMB → 记录到 `top_outputs`。
+3. 其余按 driver/receiver 逐一拆分：
+   - COMB → 同分区 SEQ：`local_c_to_s`；→ EXTERNAL：`external_inputs`；其他接收类型报错。
+   - SEQ → COMB：同分区 `local_s_to_c`，跨分区 `remote_s_to_c`；其他类型报错。
+   - EXTERNAL → COMB：`external_outputs`；其他类型报错。
+4. 以上任何违例直接抛出异常，不以 warning 继续（`analysis.warnings` 当前未使用）。
 
-## 总线模型
-- MBus：Top↔Worker。Top 下发 I/Eo，Worker 上送 O/Ei，`targetId`=0 表示 Top，1..N 表示各分区。
-- SBus：Worker↔Worker。仅承载 `remote_s_to_c`（S→C 跨分区）。
-- 本地直连：同分区的 Ct→Si / St→Ci 直接内存拷贝，不经总线。
+## 总线与 Slot 规划
+- Slot 粒度：固定 16-bit，宽信号按 16-bit 片递增 slotId（低位在低 slotId），Top 与各 Worker 的 slot 空间独立。
+- targetId 语义：Top=0，分区 pid 的 Worker=pid+1；MBus 承载 Top↔Worker 的 I/O，SBus 仅承载 `remote_s_to_c`。
+- Worker 侧 slot 编址：`next_slot` 自增复用在 MBus 拉取与 SBus 拉取（针对同一 Worker 的 C 输入），本地 copy 不占 slot。
+- Top 侧 slot 编址：顶层输出与 external 输入共用一张 slot 表（独立于任一 Worker）。
+- 计划排序：在写 JSON 前对 send/recv/copy 记录排序，保证 determinism。
 
 ## 生成代码结构
-- `C<output>TopModuleGen`：持有 `TopPortsGen`，负责 I/Eo 发送与 O/Ei 接收，并在运行期 `assert` 校验 `kCorvusGenMBusCount`。
-- `C<output>SimWorkerGenP*`：负责 comb/seq 实例化、MBus/SBus 收发、远端 S→C 解码、本地 Ct→Si / St→Ci 直连，并在运行期 `assert` 校验 `kCorvusGenMBusCount`/`kCorvusGenSBusCount`。
-- 生成头文件依赖通用 boilerplate（module_handle/top_ports/corvus_sim_worker 等），可直接纳入上层工程编译。
+- `C<output>TopModuleGen`：派生自 `CorvusTopModule`，内含 `TopPortsGen`（自动生成顶层 I/O 字段）；在构造时 `assert` MBus 端点数量。`sendIAndEOutput` 按编译期硬编码的 slotId/targetId 从 `TopPortsGen`/external 读取，轮询 mBus 端点发送；`loadOAndEInput` 逐端点 `bufferCnt` 全部读空，switch-case 直写 `TopPortsGen`/external，VL_W 通过 word+bit 偏移写回。
+- `C<output>SimWorkerGenP*`：派生自 `CorvusSimWorker`，构造时校验 MBus/SBus 端点数；`createSimModules`/`deleteSimModules` 用 `VerilatorModuleHandle` 管理 comb/seq。输入阶段分别将 MBus/SBus 缓冲读空并按 slotId 解码到 comb 端口；输出阶段 round-robin 发送到目标端点（C 输出 targetId=0，S 输出 targetId=分区+1）；`copySInputs`/`copyLocalCInputs` 直接做成员赋值（VL_W 做逐 word 拷贝）。
+- 产物：`<output>_connection_analysis.json`、`<output>_corvus_bus_plan.json`、`C<output>TopModuleGen.{h,cpp}`、`C<output>SimWorkerGenP<ID>.{h,cpp}`、聚合头 `C<output>CorvusGen.h`。
 
 ## Boilerplate 基线（CModel）
-- 总线（`boilerplate/corvus_cmodel/corvus_cmodel_idealized_bus.{h,cpp}`）：`CorvusCModelIdealizedBus` 管理 `vector<std::shared_ptr<CorvusCModelIdealizedBusEndpoint>>`；Endpoint 内部 `deque<uint64_t>` 作为收发缓冲，`send` 在 bus 协助下写入目标端点（写路径加锁，读不加锁），`recv` 空时返回 0，支持 `bufferCnt` / `clearBuffer` 查询与清理。Bus 构造时固定端点数，提供 `getEndpointCount`/`getEndpoint(s)`。
- - 同步树（`boilerplate/corvus_cmodel/corvus_cmodel_sync_tree.{h,cpp}`）：`CorvusCModelSyncTree` 生成 TopModule + N SimWorker 端点（shared_ptr 管理），维护 `topSyncFlag`、`simWorkerSFinishFlag[]`。Top 端点的 `isMBusClear`/`isSBusClear` 恒为 true；`getSimWorkerSFinishFlag` 仅在全一致时返回，否则 PENDING。SimWorker 端点可设 S finish flag，能读取 `topSyncFlag`。
-- SimWorker 骨架（`boilerplate/corvus/corvus_sim_worker.{h,cpp}`）：构造传入 synctree 端点与 m/sBus 端点指针；虚方法需由生成器实现：`createSimModules`/`deleteSimModules`、`loadMBusCInputs`、`loadSBusCInputs`、`sendMBusCOutputs`、`copySInputs`、`sendSBusSOutputs`、`copyLocalCInputs`，并通过 `init`/`cleanup` 触发生命期管理。
-- Top 模块骨架（`boilerplate/corvus/corvus_top_module.{h,cpp}`）：构造传入 top synctree 端点与 mBus 端点指针；生成器需实现 `createExternalModule`/`deleteExternalModule`、`sendIAndEOutput`、`loadOAndEInput`、`prepareSimWorker`，`clearMBusRecvBuffer` 已默认清空接收缓存。
-- Worker 线程运行器（`boilerplate/corvus_cmodel/corvus_cmodel_sim_worker_runner.{h,cpp}`）：`CorvusCModelSimWorkerRunner` 接收 `vector<std::shared_ptr<CorvusSimWorker>>`，`run` 为每个 worker 启动线程执行 `loop`，`stop` 停止并回收线程。
+- 总线：`corvus_cmodel_idealized_bus` 提供固定端点数的 FIFO 总线，`send` 写入目标端点（写路径加锁，读不加锁），`recv` 空时返回 0；支持 `bufferCnt`/`clearBuffer`。
+- 同步树：`corvus_cmodel_sync_tree` 生成 Top/Worker 端点，Top 的 `isMBusClear`/`isSBusClear` 永远为 true，Worker 端点上报 `simWorkerSync` 等旗标。
+- Worker 线程：`corvus_cmodel_sim_worker_runner` 为每个 Worker 开线程跑 `loop()`，`stop` 负责回收。
+- CModel 生成：`C<output>CModelGen` 在 `CorvusCModelGenerator` 中生成，固定 `worker_count`=分区数量，`endpoint_count`=maxPid+2；构造时创建总线/同步树、Top 与所有 Worker，并立即启动线程。公开 `eval()`（依次调用 Top::eval + Top::evalE）、`stop()`、`ports()`/`workers()` 访问器。
 
 ## 同步机制（当前实现）
-- 顶层/Worker 角色与端点
-   - 顶层 `TopModule`：持有 [boilerplate/corvus/corvus_top_module.h](boilerplate/corvus/corvus_top_module.h) / [boilerplate/corvus/corvus_top_module.cpp](boilerplate/corvus/corvus_top_module.cpp)。通过 `CorvusTopSynctreeEndpoint` 管理 Top 同步与全局完成标志；通过 `mBusEndpoints` 与各分区通信。
-   - Worker `SimWorker`：持有 [boilerplate/corvus/corvus_sim_worker.h](boilerplate/corvus/corvus_sim_worker.h) / [boilerplate/corvus/corvus_sim_worker.cpp](boilerplate/corvus/corvus_sim_worker.cpp)。通过 `CorvusSimWorkerSynctreeEndpoint` 观察 Top 同步与上报 S 阶段完成；持有 `mBusEndpoints`/`sBusEndpoints`。
-   - 同步树接口：见 [boilerplate/corvus/corvus_synctree_endpoint.h](boilerplate/corvus/corvus_synctree_endpoint.h)。`ValueFlag` 为 8-bit 环形计数（保留 0 作为 PENDING，`nextValue()` 永不返回 0）。
-
-- 顶层周期（`TopModule::eval()`）
-   - 发送 Top 输入与 External 输出：`sendIAndEOutput()`。
-   - 等待总线清空：同时等待 `isMBusClear()` 和 `isSBusClear()` 为真（确保上一轮所有帧已被消费）。
-   - 提升 Top 同步标志：`topSyncFlag.updateToNext()` 后写入 `setTopSyncFlag(topSyncFlag)`。
-   - 等待 Worker 报告 S 阶段完成：先等待 MBus 清空，再等待 `getSimWorkerSFinishFlag()` 从 `prevSFinishFlag.nextValue()` 达到一致；成功后将 `prevSFinishFlag.updateToNext()`。
-   - 接收 Top 输出与 External 输入：`loadOAndEInput()`。
-   - 额外：`prepareSimWorker()` 在启动前设置 `setSimWorkerStartFlag(START_GUARD)`；`evalE()` 驱动 external 的 `eModule->eval()`。
-
-- Worker 周期（`SimWorker::loop()`）
-   - 等待 Top 同步变化：轮询 `getTopSyncFlag()`，当等于本地 `prevTopSyncFlag.nextValue()` 时，更新 `prevTopSyncFlag.updateToNext()` 并进入本轮。
-   - C 阶段：`loadMBusCInputs()`/`loadSBusCInputs()` → `cModule->eval()` → `sendMBusCOutputs()`。
-   - S 阶段：`copySInputs()` → `sModule->eval()` → `sendSBusSOutputs()`。
-   - 上报完成：`raiseSFinishFlag()` 将本地 `sFinishFlag.updateToNext()` 并调用 `setSFinishFlag(sFinishFlag)`；随后执行 `copyLocalCInputs()` 做本地 St→Ci 的直连拷贝。
-   - 停止：`stop()` 置位 `loopContinue=false`，循环在下一次检查时退出。
-
-- 一致性与错误处理
-   - 顶层对 S 完成的判断遵循“全 worker 一致”的语义，`getSimWorkerSFinishFlag()` 未达成一致时返回 `0`（PENDING）。
-   - Worker 在 `isTopSyncFlagRaised()` 中若看到非期望值（既不是当前 `prevTopSyncFlag`，也不是 `nextValue()`）将视为严重错误并调用 `stop()`。
-   - 顶层在 `allSimWorkerSFinish()` 中若发现跳变（从当前直接跳到非 `nextValue()`）会输出致命错误并 `exit(1)`。
-
-- 总线缓冲约束
-   - 顶层在提升 Top 同步前后都会等待总线清空，避免跨轮残留。
-   - Worker 端按阶段耗尽缓冲：输入阶段拉取所有待处理帧，输出阶段尽快发送；结束后不主动清空接收缓冲（由接收者负责）。
+- ValueFlag 语义：8-bit 环形计数，0 代表 PENDING，`nextValue()` 跳过 0。
+- Top 周期（`CorvusTopModule::eval`）：
+  1) `sendIAndEOutput()` 下发本轮 I/Eo；
+  2) 等待 `isMBusClear()` 与 `isSBusClear()`；  
+  3) `raiseTopSyncFlag()` 更新同步旗标；  
+  4) 轮询 `isSimWorkerInputReadyFlagRaised()`（仅基于旗标，不检查总线）；  
+  5) `raiseTopAllowSOutputFlag()`；  
+  6) 等待 `isMBusClear()` 且 `isSimWorkerSyncFlagRaised()`；  
+  7) `loadOAndEInput()` 读取 O/Ei。
+  启动前可调用 `prepareSimWorker()` 设置 `START_GUARD`。
+- Worker 周期（`CorvusSimWorker::loop`）：
+  1) 启动守卫：自旋直到看到 `START_GUARD`；  
+  2) 轮询 `isTopSyncFlagRaised()` 进入本轮；  
+  3) `loadMBusCInputs()` → `loadSBusCInputs()` → `raiseSimWorkerInputReadyFlag()`；  
+  4) `cModule->eval()` → `sendMBusCOutputs()` → `copySInputs()`；  
+  5) `sModule->eval()` → 等待 `isTopAllowSOutputFlagRaised()` → `sendSBusSOutputs()`；  
+  6) `raiseSimWorkerSyncFlag()` → `copyLocalCInputs()`；  
+  7) 依 `loopContinue` 决定下一轮。
+- 一致性与错误处理：Worker 若观测到 topSync/topAllow 跳变至非期望值会陷入 fatal 循环；Top 若观测到 simWorkerSync 跳变到非 nextValue() 也会持续报错。Top 仅在同步前后等待 MBus/SBus 清空，Worker 不主动清空接收缓冲。

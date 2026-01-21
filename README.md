@@ -31,3 +31,12 @@ make test_corvus_gen test_corvus_slots
 # make test_corvus_yuquan
 # make test_corvus_yuquan_cmodel
 ```
+
+## YuQuan 集成脚本
+- 预备仿真工件：在仓库根目录运行 `make yuquan_build`（会在 `test/YuQuan` 下调用 verilate-archive，默认使用 `corvus-compiler`，可用 `YUQUAN_CORVUS_COMPILER_PATH=/path/to/corvus-compiler` 覆盖）。
+- 运行集成测试：  
+  - Corvus 目标：`make test_corvus_yuquan MBUS_COUNT=8 SBUS_COUNT=8 MODULE_BUILD_DIR=test/YuQuan/build/sim YUQUAN_OUTPUT_DIR=test/YuQuan/build YUQUAN_OUTPUT_NAME=YuQuan`  
+  - CModel 目标：`make test_corvus_yuquan_cmodel MBUS_COUNT=8 SBUS_COUNT=8 MODULE_BUILD_DIR=test/YuQuan/build/sim YUQUAN_CMODEL_OUTPUT_DIR=test/YuQuan/build YUQUAN_CMODEL_OUTPUT_NAME=YuQuan`
+- 目标含义：`test_corvus_yuquan` 生成并验证 corvus 目标（Top/SimWorker 头文件 + JSON）与 YuQuan 仿真对接；`test_corvus_yuquan_cmodel` 则生成并验证 cmodel 目标（额外 CModel 封装，idealized bus + worker 线程）。
+- 直接驱动 YuQuan 仿真（无需手动生成 Makefile）：`make yuquan_corvus_sim MBUS_COUNT=8 SBUS_COUNT=8` 会在 `test/YuQuan/build/sim/corvusitor-compile` 下生成并编译 corvusitor 输出，然后运行 YuQuan 仿真。可用 `CORVUSITOR_BIN`、`CORVUSITOR_MBUS_COUNT`、`CORVUSITOR_SBUS_COUNT` 覆盖。
+- 相关默认变量可在 `test/YuQuan/sim/src/corvus_vars.mk` 查看；YuQuan 根目录为 `test/YuQuan`。
